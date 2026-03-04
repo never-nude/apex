@@ -294,14 +294,19 @@ scene.add(sun);
 
 const zoneVisuals = [];
 const BIOMES = {
-  meadow: { id: "meadow", color: 0x4f8f62 },
-  scorch: { id: "scorch", color: 0x916036 },
-  wetland: { id: "wetland", color: 0x2f6d77 },
+  meadow: { id: "meadow", color: 0x5d9668, unlockTier: 1 },
+  beach: { id: "beach", color: 0xc8b784, unlockTier: 1 },
+  rainforest: { id: "rainforest", color: 0x2f7a49, unlockTier: 1 },
+  highland: { id: "highland", color: 0x70806f, unlockTier: 2 },
+  volcanic: { id: "volcanic", color: 0x8b5c3a, unlockTier: 2 },
+  wetland: { id: "wetland", color: 0x2f6d77, unlockTier: 3 },
+  cloudforest: { id: "cloudforest", color: 0x57767a, unlockTier: 3 },
 };
-const SCORCH_CENTER = new THREE.Vector3(54, 0, 8);
-const SCORCH_RADIUS = 42;
-const WETLAND_CENTER = new THREE.Vector3(-22, 0, -56);
-const WETLAND_RADIUS = 38;
+const BIOME_INDEX = Object.fromEntries(Object.values(BIOMES).map((biome) => [biome.id, biome]));
+const VOLCANIC_CENTER = new THREE.Vector3(42, 0, 22);
+const VOLCANIC_RADIUS = 34;
+const LAGOON_CENTER = new THREE.Vector3(-34, 0, -44);
+const LAGOON_RADIUS = 36;
 const worldDecor = [];
 const TERRAIN = {
   size: 720,
@@ -309,39 +314,124 @@ const TERRAIN = {
   elevationScale: 6.4,
 };
 
+function terrainClimateAt(x, z) {
+  const heat = clamp(
+    0.52 +
+      Math.sin(x * 0.012 + 1.7) * 0.21 +
+      Math.cos(z * 0.011 - 0.9) * 0.18 +
+      Math.sin((x - z) * 0.006) * 0.09,
+    0,
+    1
+  );
+  const moisture = clamp(
+    0.49 +
+      Math.cos(x * 0.009 - 1.3) * 0.24 +
+      Math.sin(z * 0.012 + 0.4) * 0.2 +
+      Math.cos((x + z) * 0.007) * 0.1,
+    0,
+    1
+  );
+  const rugged = clamp(
+    0.45 +
+      Math.sin(x * 0.02) * 0.2 +
+      Math.cos(z * 0.022) * 0.18 +
+      Math.sin((x + z) * 0.014) * 0.12,
+    0,
+    1
+  );
+  return { heat, moisture, rugged };
+}
+
+function baseTerrainHeightAt(x, z) {
+  const r = Math.sqrt(x * x + z * z);
+  const radial = Math.max(0, 1 - r / (WORLD.radius * 1.05));
+  let h =
+    Math.sin(x * 0.045) * 1.0 +
+    Math.cos(z * 0.038) * 0.92 +
+    Math.sin((x + z) * 0.022) * 0.8;
+  h += Math.sin((x - z) * 0.018) * 0.7;
+  h *= TERRAIN.elevationScale * 0.22;
+  h += radial * 0.85;
+
+  const alpineSpine = Math.exp(-Math.pow((z - 12) / 28, 2));
+  h += alpineSpine * (1.25 + Math.sin(x * 0.042) * 0.52);
+
+  const riftValley = Math.exp(-Math.pow((x + 24) / 20, 2));
+  h -= riftValley * (1.4 + Math.cos(z * 0.052) * 0.38);
+
+  return h - 0.85;
+}
+
 function biomeRegionAtXZ(x, z) {
-  const scorchDx = x - SCORCH_CENTER.x;
-  const scorchDz = z - SCORCH_CENTER.z;
-  if (scorchDx * scorchDx + scorchDz * scorchDz < SCORCH_RADIUS * SCORCH_RADIUS) {
-    return BIOMES.scorch.id;
+  const r = Math.sqrt(x * x + z * z);
+  if (r > WORLD.radius * 0.86) return BIOMES.beach.id;
+
+  const climate = terrainClimateAt(x, z);
+  const baseH = baseTerrainHeightAt(x, z);
+
+  const vdx = x - VOLCANIC_CENTER.x;
+  const vdz = z - VOLCANIC_CENTER.z;
+  const volcanoFalloff = Math.exp(-(vdx * vdx + vdz * vdz) / (VOLCANIC_RADIUS * VOLCANIC_RADIUS));
+  if (volcanoFalloff > 0.36 && climate.heat > 0.44) return BIOMES.volcanic.id;
+
+  const ldx = x - LAGOON_CENTER.x;
+  const ldz = z - LAGOON_CENTER.z;
+  const lagoonFalloff = Math.exp(-(ldx * ldx + ldz * ldz) / (LAGOON_RADIUS * LAGOON_RADIUS));
+  if (lagoonFalloff > 0.34 && (baseH < 0.12 || climate.moisture > 0.56)) return BIOMES.wetland.id;
+
+  const mountainBias = baseH + climate.rugged * 1.1;
+  if (mountainBias > 1.35) {
+    if (climate.moisture > 0.54) return BIOMES.cloudforest.id;
+    return BIOMES.highland.id;
   }
 
-  const wetDx = x - WETLAND_CENTER.x;
-  const wetDz = z - WETLAND_CENTER.z;
-  if (wetDx * wetDx + wetDz * wetDz < WETLAND_RADIUS * WETLAND_RADIUS) {
-    return BIOMES.wetland.id;
-  }
+  if (climate.moisture > 0.62 && climate.heat > 0.34) return BIOMES.rainforest.id;
+  if (climate.moisture > 0.52 && climate.heat < 0.3) return BIOMES.cloudforest.id;
+  return BIOMES.meadow.id;
+}
 
+function biomeAtXZ(x, z) {
+  const region = biomeRegionAtXZ(x, z);
+  const config = BIOME_INDEX[region];
+  if (!config) return BIOMES.meadow.id;
+  if (WORLD.tier >= config.unlockTier) return region;
+  if (region === BIOMES.beach.id || region === BIOMES.rainforest.id) return region;
   return BIOMES.meadow.id;
 }
 
 function terrainHeightAt(x, z) {
-  const r = Math.sqrt(x * x + z * z);
-  const radial = Math.max(0, 1 - r / (WORLD.radius * 1.05));
-  let h =
-    Math.sin(x * 0.045) * 0.9 +
-    Math.cos(z * 0.038) * 0.85 +
-    Math.sin((x + z) * 0.022) * 0.7;
-  h *= TERRAIN.elevationScale * 0.22;
-  h += radial * 0.8;
-
   const region = biomeRegionAtXZ(x, z);
-  if (region === BIOMES.scorch.id) {
-    h += Math.sin(x * 0.07 + z * 0.03) * 0.45 + 0.55;
+  let h = baseTerrainHeightAt(x, z);
+  const r = Math.sqrt(x * x + z * z);
+
+  if (region === BIOMES.volcanic.id) {
+    const vdx = x - VOLCANIC_CENTER.x;
+    const vdz = z - VOLCANIC_CENTER.z;
+    const d = Math.sqrt(vdx * vdx + vdz * vdz);
+    const outer = clamp(1 - d / VOLCANIC_RADIUS, 0, 1);
+    const crater = clamp(1 - d / (VOLCANIC_RADIUS * 0.44), 0, 1);
+    h += Math.pow(outer, 1.55) * 3.3;
+    h -= Math.pow(crater, 2.1) * 2.6;
+    h += Math.sin((x + z) * 0.05) * 0.26;
   } else if (region === BIOMES.wetland.id) {
-    h -= Math.cos(x * 0.05 - z * 0.06) * 0.35 + 0.45;
+    const ldx = x - LAGOON_CENTER.x;
+    const ldz = z - LAGOON_CENTER.z;
+    const d = Math.sqrt(ldx * ldx + ldz * ldz);
+    const basin = clamp(1 - d / LAGOON_RADIUS, 0, 1);
+    h -= 1.1 + basin * 1.55;
+    h += Math.cos((x - z) * 0.05) * 0.18;
+  } else if (region === BIOMES.highland.id) {
+    h += 1.05 + Math.sin(x * 0.03 + z * 0.02) * 0.24;
+  } else if (region === BIOMES.cloudforest.id) {
+    h += 0.55 + Math.cos(x * 0.026 - z * 0.02) * 0.2;
+  } else if (region === BIOMES.rainforest.id) {
+    h += 0.28 + Math.sin(x * 0.04 + z * 0.018) * 0.15;
+  } else if (region === BIOMES.beach.id) {
+    const coast = clamp((r - WORLD.radius * 0.82) / (WORLD.radius * 0.24), 0, 1);
+    h -= 1.0 + coast * 0.75;
   }
-  return h - 0.85;
+
+  return h;
 }
 
 function buildTerrainTexture(size) {
@@ -358,7 +448,7 @@ function buildTerrainTexture(size) {
       const i = (py * size + px) * 4;
       const wx = (px / (size - 1)) * TERRAIN.size - half;
       const wz = (py / (size - 1)) * TERRAIN.size - half;
-      const region = biomeRegionAtXZ(wx, wz);
+      const region = biomeAtXZ(wx, wz);
       const n =
         Math.sin(wx * 0.07) * 0.5 +
         Math.cos(wz * 0.09) * 0.4 +
@@ -368,14 +458,30 @@ function buildTerrainTexture(size) {
       let r = 74;
       let g = 112;
       let b = 84;
-      if (region === BIOMES.scorch.id) {
-        r = 144;
-        g = 106;
-        b = 62;
+      if (region === BIOMES.beach.id) {
+        r = 191;
+        g = 172;
+        b = 127;
+      } else if (region === BIOMES.rainforest.id) {
+        r = 49;
+        g = 112;
+        b = 67;
+      } else if (region === BIOMES.highland.id) {
+        r = 113;
+        g = 126;
+        b = 109;
+      } else if (region === BIOMES.volcanic.id) {
+        r = 136;
+        g = 92;
+        b = 61;
       } else if (region === BIOMES.wetland.id) {
         r = 63;
         g = 118;
         b = 124;
+      } else if (region === BIOMES.cloudforest.id) {
+        r = 88;
+        g = 118;
+        b = 123;
       }
 
       data[i] = clamp(Math.floor(r * shade), 0, 255);
@@ -424,11 +530,30 @@ function buildGroundMesh() {
 const ground = buildGroundMesh();
 scene.add(ground);
 
+function refreshGroundSurface() {
+  const geometry = ground.geometry;
+  const pos = geometry.attributes.position;
+  for (let i = 0; i < pos.count; i += 1) {
+    const x = pos.getX(i);
+    const z = pos.getZ(i);
+    pos.setY(i, terrainHeightAt(x, z));
+  }
+  pos.needsUpdate = true;
+  geometry.computeVertexNormals();
+
+  const oldMap = ground.material.map;
+  ground.material.map = buildTerrainTexture(512);
+  ground.material.needsUpdate = true;
+  if (oldMap && typeof oldMap.dispose === "function") oldMap.dispose();
+}
+
 function placeAtSurface(v, offset) {
   v.y = terrainHeightAt(v.x, v.z) + offset;
 }
 
 function rebuildBiomeVisuals() {
+  refreshGroundSurface();
+
   while (zoneVisuals.length > 0) {
     const mesh = zoneVisuals.pop();
     scene.remove(mesh);
@@ -436,40 +561,47 @@ function rebuildBiomeVisuals() {
     mesh.material.dispose();
   }
 
-  const scorch = new THREE.Mesh(
-    new THREE.CircleGeometry(SCORCH_RADIUS, 36),
-    new THREE.MeshBasicMaterial({ color: BIOMES.scorch.color, transparent: true, opacity: 0.32 })
+  const volcanic = new THREE.Mesh(
+    new THREE.CircleGeometry(VOLCANIC_RADIUS, 36),
+    new THREE.MeshBasicMaterial({ color: BIOMES.volcanic.color, transparent: true, opacity: 0.28 })
   );
-  scorch.rotation.x = -Math.PI / 2;
-  scorch.position.set(
-    SCORCH_CENTER.x,
-    terrainHeightAt(SCORCH_CENTER.x, SCORCH_CENTER.z) + 0.12,
-    SCORCH_CENTER.z
+  volcanic.rotation.x = -Math.PI / 2;
+  volcanic.position.set(
+    VOLCANIC_CENTER.x,
+    terrainHeightAt(VOLCANIC_CENTER.x, VOLCANIC_CENTER.z) + 0.12,
+    VOLCANIC_CENTER.z
   );
-  scorch.visible = WORLD.tier >= 2;
-  scene.add(scorch);
-  zoneVisuals.push(scorch);
+  volcanic.visible = WORLD.tier >= BIOMES.volcanic.unlockTier;
+  scene.add(volcanic);
+  zoneVisuals.push(volcanic);
 
   const wetland = new THREE.Mesh(
-    new THREE.CircleGeometry(WETLAND_RADIUS, 36),
-    new THREE.MeshBasicMaterial({ color: BIOMES.wetland.color, transparent: true, opacity: 0.32 })
+    new THREE.CircleGeometry(LAGOON_RADIUS, 36),
+    new THREE.MeshBasicMaterial({ color: BIOMES.wetland.color, transparent: true, opacity: 0.3 })
   );
   wetland.rotation.x = -Math.PI / 2;
   wetland.position.set(
-    WETLAND_CENTER.x,
-    terrainHeightAt(WETLAND_CENTER.x, WETLAND_CENTER.z) + 0.12,
-    WETLAND_CENTER.z
+    LAGOON_CENTER.x,
+    terrainHeightAt(LAGOON_CENTER.x, LAGOON_CENTER.z) + 0.12,
+    LAGOON_CENTER.z
   );
-  wetland.visible = WORLD.tier >= 3;
+  wetland.visible = WORLD.tier >= BIOMES.wetland.unlockTier;
   scene.add(wetland);
   zoneVisuals.push(wetland);
 }
 
 function biomeAt(v) {
-  const region = biomeRegionAtXZ(v.x, v.z);
-  if (region === BIOMES.scorch.id && WORLD.tier >= 2) return BIOMES.scorch.id;
-  if (region === BIOMES.wetland.id && WORLD.tier >= 3) return BIOMES.wetland.id;
-  return BIOMES.meadow.id;
+  return biomeAtXZ(v.x, v.z);
+}
+
+function biomeLabel(id) {
+  if (id === BIOMES.beach.id) return "beach";
+  if (id === BIOMES.rainforest.id) return "rainforest";
+  if (id === BIOMES.highland.id) return "highland";
+  if (id === BIOMES.volcanic.id) return "volcanic";
+  if (id === BIOMES.wetland.id) return "wetland";
+  if (id === BIOMES.cloudforest.id) return "cloud-forest";
+  return "meadow";
 }
 
 function clamp(v, min, max) {
@@ -1587,6 +1719,36 @@ function nextId() {
   return id;
 }
 
+function floraBiomeProfile(position) {
+  const biome = biomeAt(position);
+  if (biome === BIOMES.beach.id) {
+    return { energyMin: 6, energyMax: 11, color: 0xa8bb7b, respawnMult: 1.16 };
+  }
+  if (biome === BIOMES.rainforest.id) {
+    return { energyMin: 11, energyMax: 19, color: 0x4da05f, respawnMult: 0.9 };
+  }
+  if (biome === BIOMES.highland.id) {
+    return { energyMin: 8, energyMax: 14, color: 0x8ca77b, respawnMult: 1.1 };
+  }
+  if (biome === BIOMES.volcanic.id) {
+    return { energyMin: 12, energyMax: 22, color: 0xb37a4c, respawnMult: 1.18 };
+  }
+  if (biome === BIOMES.wetland.id) {
+    return { energyMin: 9, energyMax: 16, color: 0x5e9f92, respawnMult: 0.94 };
+  }
+  if (biome === BIOMES.cloudforest.id) {
+    return { energyMin: 10, energyMax: 17, color: 0x75a7a9, respawnMult: 0.98 };
+  }
+  return { energyMin: 9, energyMax: 16, color: 0x63b16f, respawnMult: 1.0 };
+}
+
+function applyFloraBiome(node) {
+  const profile = floraBiomeProfile(node.mesh.position);
+  node.energy = rand(profile.energyMin, profile.energyMax);
+  node.respawnMult = profile.respawnMult;
+  node.mesh.material.color.setHex(profile.color);
+}
+
 function spawnFlora() {
   const mesh = makeSphere(0x63b16f, rand(0.56, 0.9), 8);
   const p = randVec(WORLD.radius - 6);
@@ -1598,8 +1760,10 @@ function spawnFlora() {
     mesh,
     alive: true,
     respawn: 0,
-    energy: rand(9, 16),
+    energy: 10,
+    respawnMult: 1.0,
   });
+  applyFloraBiome(populations.flora[populations.flora.length - 1]);
 }
 
 function spawnPrey() {
@@ -1849,20 +2013,33 @@ function movementSpeed() {
 }
 
 function canReproduce() {
+  const req = reproductionThresholds();
+  return req.readyAge && req.readyEnergy && req.readyHealth && req.readyCooldown;
+}
+
+function reproductionThresholds() {
   const tone = toneProfile();
-  const threshold =
+  const ageMin = BALANCE.player.reproductionAgeMin * tone.reproductionAgeMult;
+  const energyMin =
     maxEnergy() * BALANCE.player.reproductionEnergyRatio * tone.reproductionEnergyMult;
   const healthMin = clamp(
     BALANCE.player.reproductionHealthMin + tone.reproductionHealthAdd,
     5,
     95
   );
-  return (
-    player.age >= BALANCE.player.reproductionAgeMin * tone.reproductionAgeMult &&
-    player.energy >= threshold &&
-    player.health > healthMin &&
-    player.reproductionCooldown <= 0
-  );
+  const readyAge = player.age >= ageMin;
+  const readyEnergy = player.energy >= energyMin;
+  const readyHealth = player.health > healthMin;
+  const readyCooldown = player.reproductionCooldown <= 0;
+  return {
+    ageMin,
+    energyMin,
+    healthMin,
+    readyAge,
+    readyEnergy,
+    readyHealth,
+    readyCooldown,
+  };
 }
 
 function requirementMet(req) {
@@ -1878,6 +2055,57 @@ function requirementText(req) {
   if (req.type === "chase") return `chase successes >= ${req.min}`;
   if (req.type === "forage") return `plants eaten >= ${req.min}`;
   return `${req.type}:${req.min}`;
+}
+
+function reproductionActionState() {
+  const req = reproductionThresholds();
+  const missing = [];
+  if (!req.readyAge) missing.push(`age ${player.age.toFixed(0)}/${req.ageMin.toFixed(0)}`);
+  if (!req.readyEnergy) missing.push(`energy ${player.energy.toFixed(0)}/${req.energyMin.toFixed(0)}`);
+  if (!req.readyHealth) missing.push(`health ${player.health.toFixed(0)}/${req.healthMin.toFixed(0)}`);
+  if (!req.readyCooldown) missing.push(`cooldown ${Math.max(0, player.reproductionCooldown).toFixed(1)}s`);
+  if (missing.length > 0) {
+    return {
+      step: "0/3",
+      text: `Build readiness: ${missing.join(" | ")}`,
+    };
+  }
+
+  if (populations.mates.length === 0) {
+    return {
+      step: "1/3",
+      text: "Press E once to signal mates.",
+    };
+  }
+
+  const selectedMate = ensureSelectedMate();
+  if (!selectedMate) {
+    return {
+      step: "1/3",
+      text: "No mate selected. Use 1/2 or Q/R.",
+    };
+  }
+
+  const dist = selectedMate.mesh.position.distanceTo(player.mesh.position);
+  const eligible = requirementMet(selectedMate.requirement);
+  if (!eligible) {
+    return {
+      step: "2/3",
+      text: `M${selectedMate.slot} locked (${requirementText(selectedMate.requirement)}). Choose another mate or satisfy requirement.`,
+    };
+  }
+
+  if (dist > BALANCE.player.reproductionInteractDistance) {
+    return {
+      step: "2/3",
+      text: `M${selectedMate.slot} eligible. Move closer (${dist.toFixed(1)}m / ${BALANCE.player.reproductionInteractDistance.toFixed(1)}m).`,
+    };
+  }
+
+  return {
+    step: "3/3",
+    text: `M${selectedMate.slot} in range. Press E now to reproduce.`,
+  };
 }
 
 function requirementShort(req) {
@@ -2044,6 +2272,7 @@ function consumeFlora(node) {
   node.respawn =
     rand(BALANCE.feeding.floraRespawnMin, BALANCE.feeding.floraRespawnMax) /
     (1 + WORLD.tier * BALANCE.feeding.floraTierRespawnScale);
+  node.respawn *= node.respawnMult || 1;
   node.mesh.visible = false;
   const gain = node.energy * (BALANCE.feeding.floraGainBase + player.traits.herbivore);
   player.energy = clamp(player.energy + gain, 0, maxEnergy());
@@ -2086,6 +2315,7 @@ function updateFlora(dt) {
       if (node.respawn <= 0) {
         node.alive = true;
         respawnEntity(node, WORLD.radius * 0.1, WORLD.radius - 6, 0.52);
+        applyFloraBiome(node);
       }
       continue;
     }
@@ -2512,12 +2742,15 @@ function updatePlayer(dt) {
     (BALANCE.player.energyDrainBase + moveDelta.length() * BALANCE.player.energyDrainMoveScale) *
     dt;
 
-  if (biome === BIOMES.scorch.id) {
+  if (biome === BIOMES.volcanic.id) {
     player.metrics.heatExposure += dt;
     energyDrain += (1 - player.traits.heat) * WORLD.hazardScale * BALANCE.player.scorchDrainScale * dt;
-  } else if (biome === BIOMES.wetland.id) {
+  } else if (biome === BIOMES.wetland.id || biome === BIOMES.cloudforest.id) {
     player.metrics.waterExposure += dt;
     energyDrain += (1 - player.traits.swim) * WORLD.hazardScale * BALANCE.player.wetlandDrainScale * dt;
+  } else if (biome === BIOMES.beach.id) {
+    player.metrics.waterExposure += dt * 0.5;
+    energyDrain += (1 - player.traits.swim) * WORLD.hazardScale * BALANCE.player.wetlandDrainScale * dt * 0.28;
   }
   energyDrain *= tone.energyDrainMult;
 
@@ -2621,75 +2854,46 @@ function nextGeneration(mate) {
 }
 
 function tryReproduce() {
-  if (!canReproduce()) {
-    setActionMessage("Not reproduction-ready: build age/energy and stay healthy.");
+  const req = reproductionThresholds();
+  if (!(req.readyAge && req.readyEnergy && req.readyHealth && req.readyCooldown)) {
+    setActionMessage("Not ready yet. Follow the Repro action line.", 2.3);
     return;
   }
 
   if (populations.mates.length === 0) {
     spawnMateCluster();
-    setActionMessage("Mates signaled nearby. Move to one and press E again.");
+    setActionMessage("Mates signaled nearby. Select one (1/2 or Q/R), move close, then press E.", 3.2);
     return;
   }
 
   const selectedMate = ensureSelectedMate();
-  if (selectedMate) {
-    const selectedDist = selectedMate.mesh.position.distanceTo(player.mesh.position);
-    const selectedEligible = requirementMet(selectedMate.requirement);
-    if (
-      selectedEligible &&
-      selectedDist <= BALANCE.player.reproductionInteractDistance
-    ) {
-      nextGeneration(selectedMate);
-      setActionMessage("Reproduction success: next generation begins.", 3.1);
-      return;
-    }
+  if (!selectedMate) {
+    setActionMessage("No mate selected. Use 1/2 or Q/R.", 2.0);
+    return;
+  }
 
-    if (selectedEligible) {
-      setActionMessage(
-        `M${selectedMate.slot} selected at ${selectedDist.toFixed(1)}m (need <= ${BALANCE.player.reproductionInteractDistance.toFixed(
-          1
-        )}m).`
-      );
-      return;
-    }
-
+  const selectedDist = selectedMate.mesh.position.distanceTo(player.mesh.position);
+  const selectedEligible = requirementMet(selectedMate.requirement);
+  if (!selectedEligible) {
     setActionMessage(
-      `M${selectedMate.slot} selected but locked (${requirementText(selectedMate.requirement)}).`
+      `M${selectedMate.slot} is locked (${requirementText(selectedMate.requirement)}).`,
+      2.6
     );
     return;
   }
 
-  const state = nearestMateState();
-
-  if (
-    state.nearestEligible &&
-    state.nearestEligibleDist <= BALANCE.player.reproductionInteractDistance
-  ) {
-    nextGeneration(state.nearestEligible);
-    setActionMessage("Reproduction success: next generation begins.", 3.1);
-    return;
-  }
-
-  if (state.nearestEligible) {
+  if (selectedDist > BALANCE.player.reproductionInteractDistance) {
     setActionMessage(
-      `Mate #${state.nearestEligible.slot} eligible at ${state.nearestEligibleDist.toFixed(
+      `Move closer to M${selectedMate.slot}: ${selectedDist.toFixed(1)}m / ${BALANCE.player.reproductionInteractDistance.toFixed(
         1
-      )}m (need <= ${BALANCE.player.reproductionInteractDistance.toFixed(
-        1
-      )}m).`
+      )}m`,
+      2.4
     );
     return;
   }
 
-  if (state.nearestAny) {
-    setActionMessage(
-      `Mate #${state.nearestAny.slot} is locked (${requirementText(state.nearestAny.requirement)}).`
-    );
-    return;
-  }
-
-  setActionMessage("No mates available yet.");
+  nextGeneration(selectedMate);
+  setActionMessage("Reproduction success: next generation begins.", 3.1);
 }
 
 function tryDeathReset() {
@@ -2713,7 +2917,10 @@ function hudText() {
   const energyMax = maxEnergy().toFixed(0);
   const ready = canReproduce() ? "ready" : "not ready";
   const biome = biomeAt(player.pos);
+  const biomeName = biomeLabel(biome);
   const lineageLen = player.lineage.length;
+  const req = reproductionThresholds();
+  const reproAction = reproductionActionState();
 
   ui.lineage.textContent =
     `Generation ${player.generation} | Lineage entries ${lineageLen} | World tier ${WORLD.tier}`;
@@ -2721,71 +2928,36 @@ function hudText() {
   ui.status.textContent =
     `Energy ${energy}/${energyMax} | Health ${player.health.toFixed(0)} | Age ${player.age.toFixed(
       0
-    )} | Biome ${biome} | Reproduction ${ready} | Tone ${tone.label} | ${predatorMode}`;
+    )} | Biome ${biomeName} | Reproduction ${ready} | Tone ${tone.label} | ${predatorMode}`;
   if (ui.repro) {
-    let reproLine = "Reproduction: not ready yet.";
-    if (canReproduce()) {
-      const selectedMate = ensureSelectedMate();
-      const state = nearestMateState();
-      if (selectedMate) {
-        const selectedDist = selectedMate.mesh.position.distanceTo(player.mesh.position);
-        const selectedEligible = requirementMet(selectedMate.requirement);
-        if (selectedEligible) {
-          reproLine = `Reproduction: selected M${selectedMate.slot} eligible (${selectedDist.toFixed(
-            1
-          )}m)`;
-        } else {
-          reproLine = `Reproduction: selected M${selectedMate.slot} locked (${requirementText(
-            selectedMate.requirement
-          )})`;
-        }
-      } else if (state.nearestEligible) {
-        reproLine = `Reproduction: Mate #${state.nearestEligible.slot} eligible (${state.nearestEligibleDist.toFixed(1)}m)`;
-      } else if (state.nearestAny) {
-        reproLine = `Reproduction: Mate #${state.nearestAny.slot} locked (${requirementText(state.nearestAny.requirement)})`;
-      } else {
-        reproLine = "Reproduction: searching for mates...";
-      }
-    }
+    const ageState = req.readyAge ? "OK" : "WAIT";
+    const energyState = req.readyEnergy ? "OK" : "WAIT";
+    const healthState = req.readyHealth ? "OK" : "WAIT";
+    const cooldownState = req.readyCooldown ? "OK" : "WAIT";
     ui.repro.textContent =
-      actionMessageTimer > 0 && actionMessage
-        ? `${reproLine} | ${actionMessage}`
-        : reproLine;
+      `Repro readiness: age ${player.age.toFixed(0)}/${req.ageMin.toFixed(0)} ${ageState} | energy ${player.energy.toFixed(
+        0
+      )}/${req.energyMin.toFixed(0)} ${energyState} | health ${player.health.toFixed(
+        0
+      )}/${req.healthMin.toFixed(0)} ${healthState} | cooldown ${Math.max(
+        0,
+        player.reproductionCooldown
+      ).toFixed(1)}s ${cooldownState}`;
   }
 
   if (ui.target) {
-    let targetLine = "Mate lock: unavailable (become reproduction-ready first).";
-    if (canReproduce()) {
-      const selectedMate = ensureSelectedMate();
-      const state = nearestMateState();
-      if (selectedMate) {
-        const selectedDist = selectedMate.mesh.position.distanceTo(player.mesh.position);
-        const selectedEligible = requirementMet(selectedMate.requirement);
-        const inRange = selectedEligible && selectedDist <= BALANCE.player.reproductionInteractDistance;
-        targetLine = inRange
-          ? `Mate lock: selected M${selectedMate.slot} IN RANGE (${selectedDist.toFixed(1)}m) -> press E`
-          : selectedEligible
-            ? `Mate lock: selected M${selectedMate.slot} eligible (${selectedDist.toFixed(1)}m)`
-            : `Mate lock: selected M${selectedMate.slot} locked (${requirementText(selectedMate.requirement)})`;
-      } else if (state.nearestEligible) {
-        const inRange = state.nearestEligibleDist <= BALANCE.player.reproductionInteractDistance;
-        targetLine = inRange
-          ? `Mate lock: M${state.nearestEligible.slot} IN RANGE (${state.nearestEligibleDist.toFixed(1)}m) -> press E`
-          : `Mate lock: M${state.nearestEligible.slot} eligible (${state.nearestEligibleDist.toFixed(1)}m)`;
-      } else if (state.nearestAny) {
-        targetLine = `Mate lock: M${state.nearestAny.slot} locked (${requirementText(state.nearestAny.requirement)})`;
-      } else {
-        targetLine = "Mate lock: scanning for mates...";
-      }
-    }
-    ui.target.textContent = targetLine;
+    const actionLine = `Repro action ${reproAction.step}: ${reproAction.text}`;
+    ui.target.textContent =
+      actionMessageTimer > 0 && actionMessage
+        ? `${actionLine} | ${actionMessage}`
+        : actionLine;
   }
 
   if (ui.mateInfo) {
     let mateInfoLine = "Mate cards: unavailable (become reproduction-ready first).";
     if (canReproduce()) {
       if (populations.mates.length === 0) {
-        mateInfoLine = "Mate cards: signaling potential mates...";
+        mateInfoLine = "Mate cards: waiting for signal. Press E to spawn mates.";
       } else {
         ensureSelectedMate();
         const cards = populations.mates
@@ -2836,13 +3008,13 @@ function hudText() {
     } else {
       ui.telemetry.textContent =
         `Telemetry fps ${telemetry.fps.toFixed(0)} | pop f:${populations.flora.length} p:${populations.prey.length} c:${populations.predators.length}` +
-        ` | lineage +${telemetry.births} / -${telemetry.deaths} | tone ${tone.label} | biome ${biome}`;
+        ` | lineage +${telemetry.births} / -${telemetry.deaths} | tone ${tone.label} | biome ${biomeName}`;
     }
   }
 
   if (ui.hint) {
     ui.hint.textContent =
-      "Move: WASD + Arrow steer (Up/Down throttle, Left/Right turn) | Focus: F | Map: G | Reproduce: E | Mate select: 1/2 or Q/R | Tone: M | Predators: P | Telemetry: T | Save: K | Load: L | New: N | Debug: Tab | Pan: Shift+Drag | Mate markers: M1/M2 cyan-green | Rival markers: R1/R2 orange | Mate lock beam: active when reproduction-ready";
+      "Move: WASD + Arrow steer (Up/Down throttle, Left/Right turn) | Focus: F | Map: G | Reproduce: E (follow Repro action line) | Mate select: 1/2 or Q/R | Tone: M | Predators: P | Telemetry: T | Save: K | Load: L | New: N | Debug: Tab | Pan: Shift+Drag | Mate markers: M1/M2 cyan-green | Rival markers: R1/R2 orange";
   }
 }
 
@@ -3167,17 +3339,17 @@ function drawMinimap() {
   ctx.fillStyle = "rgba(23, 44, 35, 0.9)";
   ctx.fillRect(0, 0, w, h);
 
-  if (WORLD.tier >= 2) {
-    ctx.fillStyle = "rgba(160, 114, 66, 0.44)";
+  if (WORLD.tier >= BIOMES.volcanic.unlockTier) {
+    ctx.fillStyle = "rgba(160, 96, 66, 0.42)";
     ctx.beginPath();
-    ctx.arc(toMapX(SCORCH_CENTER.x), toMapY(SCORCH_CENTER.z), SCORCH_RADIUS * scale, 0, Math.PI * 2);
+    ctx.arc(toMapX(VOLCANIC_CENTER.x), toMapY(VOLCANIC_CENTER.z), VOLCANIC_RADIUS * scale, 0, Math.PI * 2);
     ctx.fill();
   }
 
-  if (WORLD.tier >= 3) {
-    ctx.fillStyle = "rgba(76, 132, 143, 0.44)";
+  if (WORLD.tier >= BIOMES.wetland.unlockTier) {
+    ctx.fillStyle = "rgba(76, 132, 143, 0.4)";
     ctx.beginPath();
-    ctx.arc(toMapX(WETLAND_CENTER.x), toMapY(WETLAND_CENTER.z), WETLAND_RADIUS * scale, 0, Math.PI * 2);
+    ctx.arc(toMapX(LAGOON_CENTER.x), toMapY(LAGOON_CENTER.z), LAGOON_RADIUS * scale, 0, Math.PI * 2);
     ctx.fill();
   }
 

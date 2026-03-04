@@ -34,7 +34,7 @@ Open: `http://127.0.0.1:8158`
 - `Shift + drag` (or middle/right drag): Pan camera target
 - Mouse wheel: Zoom
 - Touch: one finger orbit, two-finger pinch zoom + pan, three-finger orbit/pan blend
-- `E`: Reproduce when near an eligible mate
+- `E`: Reproduction action button (signal mates, then reproduce with selected mate when in range)
 - `1` / `2`: Select mate slot directly (`M1`/`M2`)
 - `Q` / `R`: Cycle selected mate backward/forward
 - `M`: Cycle tone profile (`Scientific` -> `Balanced` -> `Stylized`)
@@ -54,14 +54,20 @@ Open: `http://127.0.0.1:8158`
 - Physics still uses simple sphere colliders while phenotype meshes are visual-only.
 - Three.js is vendored locally at `vendor/three.module.min.js` for reliable local preview boot.
 - Reproduction requires age + energy + health thresholds.
-- Reproduction feedback now shows nearest mate distance/lock reason, and mate spawn is centered near the player when ready.
+- Reproduction HUD now provides:
+  - readiness checklist (age/energy/health/cooldown)
+  - explicit 3-step action line (`0/3` to `3/3`) telling exactly when to press `E`
+  - mate spawn is centered near the player when ready
 - Mate readability: mates use cyan/green beacon markers (green = eligible); rivals use orange warning cones.
 - Mate/rival markers now include floating labels (`M1/M2`, `R1/R2`) for quick identification.
 - Mate lock HUD line + world-space lock beam now prioritize your selected mate (`M#`) and turn green in interaction range.
 - Mate cards are shown in HUD with trait deltas and requirement shorthand so evolution choices can be deliberate.
 - Creature presentation pass: segmented body/head rigs, snout/mouth/ornament features, eye+pupil animation, markings, outline shell, and soft ground shadow.
 - Mates can have requirements (forage/chase/energy), and rivals can steal mates.
-- Biomes expand as generation tier increases:
-  - Tier 1: meadow only
-  - Tier 2: scorch zone unlocks (heat pressure)
-  - Tier 3+: wetland unlocks (movement pressure)
+- World/biome pass now emulates mixed terrain profiles inspired by places like New Zealand and Costa Rica:
+  - Coastal beaches and lowlands
+  - Rainforest basins
+  - Highland/alpine ridges
+  - Volcanic zone (heat pressure)
+  - Wetland + cloud-forest pockets (movement pressure)
+- Biome availability still scales by tier (`tier 2` unlocks volcanic/highland, `tier 3+` unlocks wetland/cloud-forest).
