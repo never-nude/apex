@@ -910,7 +910,7 @@ function makePhenotypeProfile(opts) {
 function applyPhenotype(mesh, baseColor, profile) {
   removePhenotype(mesh);
   mesh.material.transparent = true;
-  mesh.material.opacity = 0.14;
+  mesh.material.opacity = 0.035;
 
   const role = profile.role || "neutral";
   const bodyMat = new THREE.MeshStandardMaterial({
@@ -970,17 +970,44 @@ function applyPhenotype(mesh, baseColor, profile) {
   const dorsal = [];
   const ornaments = [];
   const markings = [];
+  const hasCapsule = typeof THREE.CapsuleGeometry === "function";
 
-  const body = new THREE.Mesh(new THREE.SphereGeometry(profile.bodyRadius, 16, 16), bodyMat);
+  const bodyRadius = profile.bodyRadius;
+  const bodyLength = clamp(bodyRadius * (1.35 + profile.bodyScale.z * 0.34), bodyRadius * 1.1, bodyRadius * 2.3);
+  const bodyGeometry = hasCapsule
+    ? new THREE.CapsuleGeometry(bodyRadius * 0.58, bodyLength, 7, 12)
+    : new THREE.CylinderGeometry(bodyRadius * 0.7, bodyRadius * 0.92, bodyLength + bodyRadius * 0.82, 12);
+  const body = new THREE.Mesh(bodyGeometry, bodyMat);
+  body.rotation.x = Math.PI / 2;
   body.scale.copy(profile.bodyScale);
   rig.add(body);
 
   const bodyOutline = new THREE.Mesh(body.geometry, outlineMat);
+  bodyOutline.rotation.copy(body.rotation);
   bodyOutline.scale.copy(profile.bodyScale).multiplyScalar(1.06);
   rig.add(bodyOutline);
 
+  const shoulder = new THREE.Mesh(
+    new THREE.CylinderGeometry(bodyRadius * 0.44, bodyRadius * 0.6, bodyRadius * 0.85, 10),
+    accentMat
+  );
+  shoulder.rotation.x = Math.PI / 2;
+  shoulder.position.set(0, profile.bodyScale.y * 0.02, profile.bodyScale.z * 0.38);
+  rig.add(shoulder);
+
+  const hips = new THREE.Mesh(
+    new THREE.CylinderGeometry(bodyRadius * 0.55, bodyRadius * 0.48, bodyRadius * 0.82, 10),
+    accentMat
+  );
+  hips.rotation.x = Math.PI / 2;
+  hips.position.set(0, -profile.bodyScale.y * 0.02, -profile.bodyScale.z * 0.36);
+  rig.add(hips);
+
   const headRadius = profile.bodyRadius * 0.64;
-  const head = new THREE.Mesh(new THREE.SphereGeometry(headRadius, 14, 14), bodyMat);
+  const head = new THREE.Mesh(
+    new THREE.BoxGeometry(headRadius * 1.36, headRadius * 1.08, headRadius * 1.42, 2, 1, 2),
+    bodyMat
+  );
   head.scale.copy(profile.headScale);
   head.position.set(0, profile.bodyScale.y * 0.04, profile.bodyScale.z * 0.84);
   rig.add(head);
@@ -990,25 +1017,38 @@ function applyPhenotype(mesh, baseColor, profile) {
   headOutline.position.copy(head.position);
   rig.add(headOutline);
 
-  const belly = new THREE.Mesh(new THREE.SphereGeometry(profile.bodyRadius * 0.72, 12, 12), underMat);
-  belly.scale.set(profile.bodyScale.x * 0.84, profile.bodyScale.y * 0.52, profile.bodyScale.z * 0.74);
-  belly.position.set(0, -profile.bodyScale.y * 0.2, profile.bodyScale.z * 0.12);
+  const belly = new THREE.Mesh(
+    new THREE.CylinderGeometry(bodyRadius * 0.44, bodyRadius * 0.56, bodyLength * 0.78, 10),
+    underMat
+  );
+  belly.rotation.x = Math.PI / 2;
+  belly.scale.set(profile.bodyScale.x * 0.86, profile.bodyScale.y * 0.55, profile.bodyScale.z * 0.74);
+  belly.position.set(0, -profile.bodyScale.y * 0.23, profile.bodyScale.z * 0.05);
   rig.add(belly);
 
   for (let i = 0; i < profile.stripeCount; i += 1) {
-    const patch = new THREE.Mesh(new THREE.SphereGeometry(profile.bodyRadius * 0.26, 9, 9), markMat);
-    patch.scale.set(profile.bodyScale.x * 0.68, profile.bodyScale.y * 0.22, profile.bodyScale.z * 0.18);
+    const patch = new THREE.Mesh(
+      new THREE.BoxGeometry(bodyRadius * 0.54, bodyRadius * 0.2, bodyRadius * 0.12, 1, 1, 1),
+      markMat
+    );
+    patch.scale.set(profile.bodyScale.x * 0.84, profile.bodyScale.y * 0.32, profile.bodyScale.z * 0.32);
     patch.position.set(
       0,
-      profile.bodyScale.y * (0.08 + i * 0.08),
-      -profile.bodyScale.z * 0.3 + i * profile.bodyScale.z * 0.22
+      profile.bodyScale.y * (0.06 + i * 0.1),
+      -profile.bodyScale.z * 0.38 + i * profile.bodyScale.z * 0.24
     );
+    patch.rotation.y = Math.PI / 2;
     markings.push(patch);
     rig.add(patch);
   }
 
   const snout = new THREE.Mesh(
-    new THREE.ConeGeometry(0.09 + profile.snoutLength * 0.18, profile.snoutLength, 10),
+    new THREE.CylinderGeometry(
+      0.06 + profile.snoutLength * 0.1,
+      0.11 + profile.snoutLength * 0.13,
+      profile.snoutLength,
+      10
+    ),
     underMat
   );
   snout.rotation.x = Math.PI / 2;
@@ -1019,12 +1059,9 @@ function applyPhenotype(mesh, baseColor, profile) {
   );
   rig.add(snout);
 
-  const mouth = new THREE.Mesh(
-    new THREE.TorusGeometry(0.065 + profile.snoutLength * 0.09, 0.01, 6, 12, Math.PI),
-    mouthMat
-  );
-  mouth.position.set(0, snout.position.y - 0.02, snout.position.z + profile.snoutLength * 0.26);
-  mouth.rotation.x = Math.PI / 2;
+  const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.03, 0.07), mouthMat);
+  mouth.position.set(0, snout.position.y - 0.03, snout.position.z + profile.snoutLength * 0.3);
+  mouth.rotation.x = Math.PI * 0.08;
   rig.add(mouth);
 
   for (const side of [-1, 1]) {
@@ -1090,7 +1127,7 @@ function applyPhenotype(mesh, baseColor, profile) {
       limb.rotation.z = Math.sin(ang) * 0.25;
     } else {
       limb = new THREE.Mesh(
-        new THREE.ConeGeometry(0.08, profile.appendageLength, 8),
+        new THREE.ConeGeometry(0.07, profile.appendageLength * 0.96, 5),
         accentMat
       );
       limb.position.copy(dir.clone().multiplyScalar(profile.bodyScale.x * 0.66));
@@ -1125,7 +1162,15 @@ function applyPhenotype(mesh, baseColor, profile) {
     rig.add(spike);
   }
 
-  const tail = new THREE.Mesh(new THREE.ConeGeometry(0.09 + profile.tailLength * 0.02, profile.tailLength, 9), accentMat);
+  const tail = new THREE.Mesh(
+    new THREE.CylinderGeometry(
+      0.028 + profile.tailLength * 0.018,
+      0.11 + profile.tailLength * 0.028,
+      profile.tailLength,
+      8
+    ),
+    accentMat
+  );
   tail.position.set(0, 0, -profile.bodyScale.z * 0.95);
   tail.rotation.x = Math.PI / 2;
   rig.add(tail);
@@ -1547,9 +1592,9 @@ function refreshPlayerPhenotype(force) {
   applyPhenotype(player.mesh, 0xe7f4c6, profile);
   ensurePlayerMarker();
   setPhenotypeTint(player.mesh, 0xeeffd8);
-  player.mesh.material.opacity = 0.44;
+  player.mesh.material.opacity = 0.1;
   player.mesh.material.emissive.setHex(0x174f3f);
-  player.mesh.material.emissiveIntensity = 0.56;
+  player.mesh.material.emissiveIntensity = 0.16;
   player.renderedMorphTraits = cloneTraits(source);
   player.morphLabel = phenotypeLabel(source, profile);
   return true;
