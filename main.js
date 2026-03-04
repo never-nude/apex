@@ -15,6 +15,8 @@ const BALANCE = {
   populations: {
     floraBase: 24,
     floraPerTier: 12,
+    treeBase: 12,
+    treePerTier: 8,
     preyBase: 12,
     preyPerTier: 7,
     predatorBase: 5,
@@ -173,6 +175,34 @@ const TRAIT_SHORT = Object.freeze({
   swim: "swim",
   heat: "heat",
   social: "social",
+});
+
+const DEFAULT_PHENOTYPE_DNA = Object.freeze({
+  frame: 0.5,
+  mass: 0.5,
+  cranial: 0.5,
+  limb: 0.5,
+  dorsal: 0.5,
+  tail: 0.5,
+  pigment: 0.5,
+  pattern: 0.5,
+});
+const PHENOTYPE_DNA_KEYS = Object.keys(DEFAULT_PHENOTYPE_DNA);
+
+const SPECIES_ARCHETYPES = Object.freeze({
+  generalist: "Generalist",
+  grazer: "Grazer",
+  hunter: "Hunter",
+  swimmer: "Swimmer",
+  glider: "Glider",
+});
+
+const SPECIES_COMPATIBILITY = Object.freeze({
+  generalist: Object.freeze({ generalist: 0.9, grazer: 0.84, hunter: 0.82, swimmer: 0.78, glider: 0.8 }),
+  grazer: Object.freeze({ generalist: 0.84, grazer: 0.93, hunter: 0.52, swimmer: 0.66, glider: 0.72 }),
+  hunter: Object.freeze({ generalist: 0.82, grazer: 0.52, hunter: 0.92, swimmer: 0.68, glider: 0.75 }),
+  swimmer: Object.freeze({ generalist: 0.78, grazer: 0.66, hunter: 0.68, swimmer: 0.9, glider: 0.65 }),
+  glider: Object.freeze({ generalist: 0.8, grazer: 0.72, hunter: 0.75, swimmer: 0.65, glider: 0.89 }),
 });
 
 const TONE_PROFILES = Object.freeze([
@@ -779,11 +809,139 @@ function setPhenotypeTint(mesh, hex) {
   }
 }
 
+function clonePhenotypeDNA(source) {
+  const out = {};
+  for (const key of PHENOTYPE_DNA_KEYS) {
+    const value = Number(source && source[key]);
+    out[key] = Number.isFinite(value) ? clamp(value, 0, 1) : DEFAULT_PHENOTYPE_DNA[key];
+  }
+  return out;
+}
+
+function sanitizePhenotypeDNA(source) {
+  const out = {};
+  for (const key of PHENOTYPE_DNA_KEYS) {
+    const value = Number(source && source[key]);
+    out[key] = Number.isFinite(value) ? clamp(value, 0, 1) : DEFAULT_PHENOTYPE_DNA[key];
+  }
+  return out;
+}
+
+function wrap01(v) {
+  const n = Number(v) || 0;
+  return ((n % 1) + 1) % 1;
+}
+
+function phenotypeRoleHue(role) {
+  if (role === "predator" || role === "rival") return 0.03;
+  if (role === "aquatic") return 0.54;
+  if (role === "avian") return 0.12;
+  if (role === "mate") return 0.5;
+  if (role === "player") return 0.29;
+  return 0.24;
+}
+
+function randomPhenotypeDNA(seed, role, traits) {
+  const next = seeded((seed >>> 0) ^ 0x9e3779b9);
+  const t = sanitizeTraits(traits || DEFAULT_TRAITS);
+  const biasByRole = {
+    frame: role === "avian" ? 0.58 : role === "aquatic" ? 0.46 : role === "predator" ? 0.55 : 0.5,
+    mass: role === "predator" ? 0.62 : role === "avian" ? 0.38 : 0.5,
+    cranial: role === "predator" ? 0.62 : role === "mate" ? 0.48 : 0.5,
+    limb: role === "aquatic" ? 0.22 : role === "avian" ? 0.68 : 0.5,
+    dorsal: role === "predator" ? 0.64 : 0.5,
+    tail: role === "aquatic" ? 0.72 : role === "avian" ? 0.55 : 0.5,
+    pigment: role === "mate" ? 0.58 : role === "predator" ? 0.46 : 0.5,
+    pattern: role === "predator" ? 0.66 : role === "avian" ? 0.6 : 0.5,
+  };
+  return sanitizePhenotypeDNA({
+    frame: biasByRole.frame + (t.speed - 0.5) * 0.24 + (next() * 2 - 1) * 0.28,
+    mass: biasByRole.mass + (t.stamina - 0.5) * 0.34 + (next() * 2 - 1) * 0.26,
+    cranial: biasByRole.cranial + (t.carnivore - t.herbivore) * 0.22 + (next() * 2 - 1) * 0.24,
+    limb: biasByRole.limb + (t.social - 0.5) * 0.18 + (next() * 2 - 1) * 0.3,
+    dorsal: biasByRole.dorsal + (t.heat - 0.5) * 0.2 + (next() * 2 - 1) * 0.28,
+    tail: biasByRole.tail + (t.swim - 0.5) * 0.3 + (next() * 2 - 1) * 0.24,
+    pigment: biasByRole.pigment + (next() * 2 - 1) * 0.36,
+    pattern: biasByRole.pattern + (next() * 2 - 1) * 0.34,
+  });
+}
+
+function hybridizePhenotypeDNA(parentDNA, mateDNA, seed) {
+  const a = sanitizePhenotypeDNA(parentDNA);
+  const b = sanitizePhenotypeDNA(mateDNA);
+  const next = seeded((seed >>> 0) ^ 0xa341316c);
+  const out = {};
+  for (const key of PHENOTYPE_DNA_KEYS) {
+    const dominance = 0.58 + next() * 0.28;
+    const parentDominant = next() < 0.5;
+    const lhs = parentDominant ? a[key] : b[key];
+    const rhs = parentDominant ? b[key] : a[key];
+    const mutation = (next() * 2 - 1) * 0.06;
+    out[key] = clamp(lhs * dominance + rhs * (1 - dominance) + mutation, 0, 1);
+  }
+  return out;
+}
+
+function phenotypeColorFromDNA(role, dnaSource, seed) {
+  const dna = sanitizePhenotypeDNA(dnaSource);
+  const next = seeded((seed >>> 0) ^ 0xc8013ea4);
+  const h = wrap01(phenotypeRoleHue(role) + (dna.pigment - 0.5) * 0.16 + (next() * 2 - 1) * 0.035);
+  const s = clamp(0.34 + dna.pattern * 0.45 + (next() * 2 - 1) * 0.07, 0.2, 0.86);
+  const l = clamp(0.42 + dna.mass * 0.18 - dna.pigment * 0.08 + (next() * 2 - 1) * 0.06, 0.26, 0.78);
+  return new THREE.Color().setHSL(h, s, l).getHex();
+}
+
+function speciesFromTraits(traits, dnaSource) {
+  const t = sanitizeTraits(traits);
+  const dna = sanitizePhenotypeDNA(dnaSource || t);
+  if (t.swim > 0.62 && dna.tail > 0.58) return "swimmer";
+  if (t.carnivore > t.herbivore + 0.24 && t.speed > 0.38) return "hunter";
+  if (t.herbivore > t.carnivore + 0.24 && t.stamina > 0.32) return "grazer";
+  if (t.speed > 0.58 && t.social > 0.45 && dna.limb > 0.55) return "glider";
+  return "generalist";
+}
+
+function phenotypeDNADistance(a, b) {
+  const lhs = sanitizePhenotypeDNA(a);
+  const rhs = sanitizePhenotypeDNA(b);
+  let sum = 0;
+  for (const key of PHENOTYPE_DNA_KEYS) {
+    sum += Math.abs(lhs[key] - rhs[key]);
+  }
+  return sum / PHENOTYPE_DNA_KEYS.length;
+}
+
+function mateCompatibilityTier(score) {
+  if (score >= 0.8) return "ideal";
+  if (score >= 0.62) return "viable";
+  if (score >= 0.45) return "risky";
+  return "fragile";
+}
+
+function evaluateMateCompatibility(playerTraits, playerDNA, mateTraits, mateDNA) {
+  const playerSpecies = speciesFromTraits(playerTraits, playerDNA);
+  const mateSpecies = speciesFromTraits(mateTraits, mateDNA);
+  const speciesBase =
+    (SPECIES_COMPATIBILITY[playerSpecies] && SPECIES_COMPATIBILITY[playerSpecies][mateSpecies]) || 0.66;
+  const traitFit = 1 - traitDistance(playerTraits, mateTraits) * 0.7;
+  const dnaFit = 1 - phenotypeDNADistance(playerDNA, mateDNA) * 0.58;
+  const score = clamp(speciesBase * 0.52 + traitFit * 0.3 + dnaFit * 0.18, 0.1, 1);
+  return {
+    score,
+    tier: mateCompatibilityTier(score),
+    playerSpecies,
+    mateSpecies,
+    playerSpeciesLabel: SPECIES_ARCHETYPES[playerSpecies] || "Unknown",
+    mateSpeciesLabel: SPECIES_ARCHETYPES[mateSpecies] || "Unknown",
+  };
+}
+
 function makePhenotypeProfile(opts) {
   const next = seeded(opts.seed || 1);
   const t = sanitizeTraits(opts.traits || DEFAULT_TRAITS);
   const role = opts.role || "neutral";
   const heritage = sanitizeTraits(opts.heritage || t);
+  const dna = sanitizePhenotypeDNA(opts.dna || t);
   const generation = clamp(Math.floor(Number(opts.generation) || 1), 1, 9999);
   const generationProgress = clamp((generation - 1) / 10, 0, 1);
   const tone = toneProfile();
@@ -799,6 +957,11 @@ function makePhenotypeProfile(opts) {
     new THREE.Vector3(avgScale * 1.03, avgScale * 0.96, avgScale * 1.02),
     cute * 0.28
   );
+  bodyScale.set(
+    clamp(bodyScale.x * (0.82 + dna.frame * 0.42), 0.62, 2.22),
+    clamp(bodyScale.y * (0.78 + dna.mass * 0.5), 0.58, 2.08),
+    clamp(bodyScale.z * (0.8 + dna.frame * 0.18 + dna.tail * 0.28), 0.6, 2.2)
+  );
 
   let appendageType = "spike";
   if (t.swim > 0.56) appendageType = "fin";
@@ -806,6 +969,8 @@ function makePhenotypeProfile(opts) {
   if (role === "predator") appendageType = "spike";
   if (role === "prey" && t.swim < 0.55) appendageType = "leg";
   if (cute > 0.93 && appendageType === "spike" && role !== "predator") appendageType = "leg";
+  if (dna.limb < 0.28 && t.swim > 0.26) appendageType = "fin";
+  if (dna.limb > 0.72 && appendageType !== "fin") appendageType = "leg";
 
   const baseAppendageCount = clamp(
     Math.round(2 + t.speed * 2 + t.carnivore * 3 + t.social * 2 + next() * 3),
@@ -817,29 +982,41 @@ function makePhenotypeProfile(opts) {
     2,
     9
   );
+  appendageCount = clamp(Math.round(appendageCount + (dna.pattern - 0.5) * 3), 2, 10);
 
   let dorsalCount = clamp(
     Math.round((t.carnivore * 3 + t.heat * 2 + next() * 2) * (1 - cute * 0.15)),
     0,
     5
   );
+  dorsalCount = clamp(Math.round(dorsalCount + (dna.dorsal - 0.5) * 3), 0, 6);
   let tailLength = clamp(0.3 + t.speed * 0.7 + t.swim * 0.5 + next() * 0.25, 0.2, 1.65);
+  tailLength = clamp(tailLength * (0.8 + dna.tail * 0.52), 0.2, 2.2);
   const eyeScale = clamp(0.08 + t.social * 0.07 + next() * 0.06 + cute * 0.04, 0.06, 0.24);
   const eyeSpacing = clamp(0.12 + t.social * 0.1 + next() * 0.05, 0.12, 0.3);
-  let bodyRadius = 0.72 + cute * 0.07;
+  let bodyRadius = (0.72 + cute * 0.07) * (0.82 + dna.mass * 0.34);
   let appendageLength = clamp(
     (0.28 + t.speed * 0.45 + t.carnivore * 0.35 + next() * 0.24) * (1 - cute * 0.14),
     0.18,
     1.18
   );
+  appendageLength = clamp(appendageLength * (0.8 + dna.limb * 0.44), 0.16, 1.6);
   let snoutLength = clamp(0.18 + t.carnivore * 0.42 + t.herbivore * 0.18 + next() * 0.1, 0.16, 0.7);
+  snoutLength = clamp(snoutLength * (0.76 + dna.cranial * 0.56), 0.14, 0.98);
   let crestHeight = clamp((0.12 + t.carnivore * 0.28 + t.heat * 0.18) * (1 - cute * 0.12), 0.05, 0.46);
+  crestHeight = clamp(crestHeight * (0.72 + dna.dorsal * 0.7), 0.03, 0.72);
   const earSize = clamp(0.1 + t.social * 0.2 + cute * 0.1 + next() * 0.06, 0.08, 0.44);
   let stripeCount = clamp(Math.round(1 + t.carnivore * 2 + t.heat * 1.5 + next() * 1.5), 1, 4);
+  stripeCount = clamp(Math.round(stripeCount + (dna.pattern - 0.5) * 2), 1, 6);
   let headScale = new THREE.Vector3(
     clamp(bodyScale.x * (0.54 + t.social * 0.11 + cute * 0.06), 0.48, 1.15),
     clamp(bodyScale.y * (0.48 + t.stamina * 0.1 + cute * 0.05), 0.45, 1.1),
     clamp(bodyScale.z * (0.5 + t.carnivore * 0.16 + t.herbivore * 0.12), 0.45, 1.2)
+  );
+  headScale.set(
+    clamp(headScale.x * (0.78 + dna.cranial * 0.5), 0.4, 1.45),
+    clamp(headScale.y * (0.8 + dna.mass * 0.26), 0.4, 1.38),
+    clamp(headScale.z * (0.8 + dna.cranial * 0.56), 0.4, 1.5)
   );
 
   if (role === "player" && generation > 1) {
@@ -890,6 +1067,7 @@ function makePhenotypeProfile(opts) {
     generation,
     generationProgress,
     role,
+    dna,
     appendageType,
     appendageCount,
     appendageLength,
@@ -1340,8 +1518,10 @@ const player = {
   generation: 1,
   lineage: [],
   reproductionCooldown: 0,
+  fertilityQuality: 1,
   traits: { ...DEFAULT_TRAITS },
   phenotypeHeritage: { ...DEFAULT_TRAITS },
+  phenotypeDNA: { ...DEFAULT_PHENOTYPE_DNA },
   morphTraits: { ...DEFAULT_TRAITS },
   renderedMorphTraits: { ...DEFAULT_TRAITS },
   morphSeed: 911,
@@ -1574,16 +1754,23 @@ function refreshPlayerPhenotype(force) {
   if (!force && traitDistance(source, player.renderedMorphTraits) < BALANCE.phenotype.refreshThreshold) {
     return false;
   }
+  const dna = sanitizePhenotypeDNA(
+    player.phenotypeDNA || randomPhenotypeDNA(player.morphSeed + player.generation * 19, "player", source)
+  );
+  player.phenotypeDNA = dna;
   const profile = makePhenotypeProfile({
     seed: player.morphSeed,
     role: "player",
     traits: source,
+    dna,
     generation: player.generation,
     heritage: player.phenotypeHeritage,
   });
-  applyPhenotype(player.mesh, 0xe7f4c6, profile);
+  const baseColor = phenotypeColorFromDNA("player", dna, player.morphSeed + player.generation * 37);
+  applyPhenotype(player.mesh, baseColor, profile);
   ensurePlayerMarker();
-  setPhenotypeTint(player.mesh, 0xeeffd8);
+  const tint = new THREE.Color(baseColor).offsetHSL(0.02, 0.03, 0.1).getHex();
+  setPhenotypeTint(player.mesh, tint);
   player.mesh.material.opacity = 0.1;
   player.mesh.material.emissive.setHex(0x174f3f);
   player.mesh.material.emissiveIntensity = 0.16;
@@ -1821,9 +2008,11 @@ function saveSnapshot(reason) {
       age: Number(player.age.toFixed(3)),
       energy: Number(player.energy.toFixed(3)),
       health: Number(player.health.toFixed(3)),
+      fertilityQuality: Number(player.fertilityQuality.toFixed(3)),
       reproductionCooldown: Number(player.reproductionCooldown.toFixed(3)),
       traits: { ...player.traits },
       phenotypeHeritage: cloneTraits(player.phenotypeHeritage),
+      phenotypeDNA: clonePhenotypeDNA(player.phenotypeDNA),
       morphTraits: cloneTraits(player.morphTraits),
       morphSeed: player.morphSeed,
       lineage: player.lineage.slice(-BALANCE.save.maxLineageEntries),
@@ -1896,6 +2085,9 @@ function loadSnapshot() {
   player.generation = clamp(Math.floor(Number(state.generation) || 1), 1, 9999);
   player.traits = sanitizeTraits(state.traits);
   player.phenotypeHeritage = sanitizeTraits(state.phenotypeHeritage || state.morphTraits || state.traits);
+  player.phenotypeDNA = sanitizePhenotypeDNA(
+    state.phenotypeDNA || randomPhenotypeDNA((Number(state.morphSeed) || player.generation * 911) + 23, "player", state.traits)
+  );
   player.morphTraits = sanitizeTraits(state.morphTraits || state.traits);
   player.renderedMorphTraits = cloneTraits(player.morphTraits);
   player.morphSeed = clamp(Math.floor(Number(state.morphSeed) || player.generation * 911), 1, 2147483646);
@@ -1908,6 +2100,7 @@ function loadSnapshot() {
 
   player.age = clamp(Number(state.age) || 0, 0, 99999);
   player.health = clamp(Number(state.health) || 100, 0, 100);
+  player.fertilityQuality = clamp(Number(state.fertilityQuality) || 1, 0.5, 1.3);
   player.reproductionCooldown = clamp(Number(state.reproductionCooldown) || 0, 0, 9999);
   player.pos.set(Number(state.pos && state.pos.x) || 0, 0, Number(state.pos && state.pos.z) || 0);
   limitToWorld(player.pos);
@@ -1968,6 +2161,8 @@ function newLineage(clearSave) {
   player.generation = 1;
   player.traits = { ...DEFAULT_TRAITS };
   player.phenotypeHeritage = { ...DEFAULT_TRAITS };
+  player.phenotypeDNA = randomPhenotypeDNA(player.generation * 911 + 41, "player", player.traits);
+  player.fertilityQuality = 1;
   resetPlayerMorphology(player.generation * 911 + 17);
   player.lineage = [];
   setWorldFromGeneration(player.generation);
@@ -1981,6 +2176,7 @@ function newLineage(clearSave) {
 
 const populations = {
   flora: [],
+  trees: [],
   prey: [],
   predators: [],
   aquatic: [],
@@ -1994,6 +2190,127 @@ function nextId() {
   const id = idCounter;
   idCounter += 1;
   return id;
+}
+
+const FLORA_VARIANTS = Object.freeze([
+  Object.freeze({
+    id: "clover",
+    label: "Clover Patch",
+    shape: "sphere",
+    edible: true,
+    toxic: false,
+    harm: 0,
+    weight: 2.1,
+    energyMult: 1.0,
+    respawnMult: 1.0,
+    color: 0x6cbf5f,
+  }),
+  Object.freeze({
+    id: "berry",
+    label: "Berry Cluster",
+    shape: "dodeca",
+    edible: true,
+    toxic: false,
+    harm: 0,
+    weight: 1.25,
+    energyMult: 1.32,
+    respawnMult: 0.9,
+    color: 0x7fce52,
+  }),
+  Object.freeze({
+    id: "reed",
+    label: "Reed Frond",
+    shape: "cone",
+    edible: true,
+    toxic: false,
+    harm: 0,
+    weight: 1.05,
+    energyMult: 0.84,
+    respawnMult: 1.12,
+    color: 0x96c96a,
+  }),
+  Object.freeze({
+    id: "thorn",
+    label: "Thorn Brush",
+    shape: "octa",
+    edible: false,
+    toxic: false,
+    harm: 5.5,
+    weight: 0.78,
+    energyMult: 0.25,
+    respawnMult: 1.08,
+    color: 0x9a8d53,
+  }),
+  Object.freeze({
+    id: "spore",
+    label: "Spore Cap",
+    shape: "tetra",
+    edible: false,
+    toxic: true,
+    harm: 8.5,
+    weight: 0.62,
+    energyMult: 0.2,
+    respawnMult: 0.95,
+    color: 0xc5874a,
+  }),
+]);
+
+function floraVariantWeight(variant, biome) {
+  let weight = variant.weight;
+  if (biome === BIOMES.wetland.id || biome === BIOMES.cloudforest.id) {
+    if (variant.id === "reed") weight *= 1.7;
+    if (variant.id === "spore") weight *= 1.25;
+  }
+  if (biome === BIOMES.beach.id) {
+    if (variant.id === "reed") weight *= 1.35;
+    if (variant.id === "thorn") weight *= 1.25;
+  }
+  if (biome === BIOMES.volcanic.id) {
+    if (variant.id === "thorn") weight *= 1.45;
+    if (variant.id === "spore") weight *= 1.2;
+    if (variant.id === "berry") weight *= 0.75;
+  }
+  if (biome === BIOMES.rainforest.id) {
+    if (variant.id === "berry") weight *= 1.4;
+    if (variant.id === "spore") weight *= 1.2;
+  }
+  return Math.max(0.05, weight);
+}
+
+function pickFloraVariant(biome) {
+  const options = FLORA_VARIANTS.map((variant) => ({
+    variant,
+    weight: floraVariantWeight(variant, biome),
+  }));
+  const picked = weightedPick(options);
+  return (picked && picked.variant) || FLORA_VARIANTS[0];
+}
+
+function createFloraMesh(variant, size) {
+  let geometry;
+  if (variant.shape === "cone") {
+    geometry = new THREE.ConeGeometry(size * 0.56, size * 1.55, 8);
+  } else if (variant.shape === "dodeca") {
+    geometry = new THREE.DodecahedronGeometry(size * 0.95, 0);
+  } else if (variant.shape === "octa") {
+    geometry = new THREE.OctahedronGeometry(size * 0.9, 0);
+  } else if (variant.shape === "tetra") {
+    geometry = new THREE.TetrahedronGeometry(size * 0.94, 0);
+  } else {
+    geometry = new THREE.SphereGeometry(size, 9, 8);
+  }
+  const material = new THREE.MeshStandardMaterial({
+    color: variant.color,
+    roughness: 0.72,
+    metalness: variant.toxic ? 0.12 : 0.05,
+  });
+  return new THREE.Mesh(geometry, material);
+}
+
+function floraHeightOffset(variant, size) {
+  if (variant.shape === "cone" || variant.shape === "tetra") return size * 0.72;
+  if (variant.shape === "dodeca" || variant.shape === "octa") return size * 0.66;
+  return size * 0.6;
 }
 
 function floraBiomeProfile(position) {
@@ -2021,20 +2338,48 @@ function floraBiomeProfile(position) {
 
 function applyFloraBiome(node) {
   const profile = floraBiomeProfile(node.mesh.position);
-  node.energy = rand(profile.energyMin, profile.energyMax);
-  node.respawnMult = profile.respawnMult;
-  node.mesh.material.color.setHex(profile.color);
+  const variant = node.variant || FLORA_VARIANTS[0];
+  node.energy = rand(profile.energyMin, profile.energyMax) * (variant.energyMult || 1);
+  node.respawnMult = profile.respawnMult * (variant.respawnMult || 1);
+  node.edible = !!variant.edible;
+  node.toxic = !!variant.toxic;
+  node.harm = Number(variant.harm) || 0;
+  const biomeColor = new THREE.Color(profile.color);
+  const variantColor = new THREE.Color(variant.color || profile.color);
+  const blend = variant.edible ? 0.26 : 0.12;
+  const finalColor = variantColor.clone().lerp(biomeColor, blend);
+  node.mesh.material.color.copy(finalColor);
+  if (variant.toxic) {
+    node.mesh.material.emissive.setHex(0x6e2f12);
+    node.mesh.material.emissiveIntensity = 0.18;
+  } else if (!variant.edible) {
+    node.mesh.material.emissive.setHex(0x4f421a);
+    node.mesh.material.emissiveIntensity = 0.1;
+  } else {
+    node.mesh.material.emissive.setHex(0x000000);
+    node.mesh.material.emissiveIntensity = 0;
+  }
 }
 
 function spawnFlora() {
-  const mesh = makeSphere(0x63b16f, rand(0.56, 0.9), 8);
   const p = randVec(WORLD.radius - 6);
-  placeAtSurface(p, 0.52);
+  const biome = biomeAtXZ(p.x, p.z);
+  const variant = pickFloraVariant(biome);
+  const size = rand(0.52, 0.98);
+  const mesh = createFloraMesh(variant, size);
+  const heightOffset = floraHeightOffset(variant, size);
+  placeAtSurface(p, heightOffset);
   mesh.position.copy(p);
   scene.add(mesh);
   populations.flora.push({
     id: nextId(),
     mesh,
+    variant,
+    size,
+    heightOffset,
+    edible: !!variant.edible,
+    toxic: !!variant.toxic,
+    harm: Number(variant.harm) || 0,
     alive: true,
     respawn: 0,
     energy: 10,
@@ -2043,29 +2388,99 @@ function spawnFlora() {
   applyFloraBiome(populations.flora[populations.flora.length - 1]);
 }
 
+function treeBiomeEligible(id) {
+  if (id === BIOMES.volcanic.id) return Math.random() < 0.35;
+  return id !== BIOMES.beach.id && !biomeIsWaterLike(id);
+}
+
+function randomTreeSpawnPoint() {
+  const p = new THREE.Vector3();
+  for (let attempt = 0; attempt < 18; attempt += 1) {
+    const candidate = randVec(WORLD.radius - 9);
+    p.copy(candidate);
+    limitToWorld(p);
+    const biome = biomeAtXZ(p.x, p.z);
+    if (treeBiomeEligible(biome)) return p;
+  }
+  p.copy(randVec(WORLD.radius * 0.7));
+  limitToWorld(p);
+  return p;
+}
+
+function spawnTree() {
+  const id = nextId();
+  const root = new THREE.Group();
+  const scale = rand(0.9, 1.45);
+  const trunkHeight = rand(2.2, 3.8) * scale;
+  const trunkRadius = rand(0.24, 0.42) * scale;
+  const canopyRadius = rand(1.05, 1.75) * scale;
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x7a5b35, roughness: 0.84, metalness: 0.02 });
+  const leafMat = new THREE.MeshStandardMaterial({ color: 0x5a9f47, roughness: 0.78, metalness: 0.03 });
+
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(trunkRadius * 0.72, trunkRadius, trunkHeight, 8), trunkMat);
+  trunk.position.y = trunkHeight * 0.5;
+  root.add(trunk);
+
+  const canopyLow = new THREE.Mesh(
+    new THREE.ConeGeometry(canopyRadius, canopyRadius * 1.28, 9),
+    leafMat
+  );
+  canopyLow.position.y = trunkHeight + canopyRadius * 0.42;
+  root.add(canopyLow);
+
+  const canopyTop = new THREE.Mesh(
+    new THREE.SphereGeometry(canopyRadius * 0.68, 10, 9),
+    leafMat.clone()
+  );
+  canopyTop.material.color.offsetHSL(0.02, 0.02, 0.05);
+  canopyTop.position.y = trunkHeight + canopyRadius * 1.05;
+  root.add(canopyTop);
+
+  const p = randomTreeSpawnPoint();
+  p.y = terrainHeightAt(p.x, p.z);
+  root.position.copy(p);
+  root.rotation.y = rand(0, Math.PI * 2);
+  scene.add(root);
+
+  populations.trees.push({
+    id,
+    mesh: root,
+    swayPhase: rand(0, Math.PI * 2),
+    canopyLow,
+    canopyTop,
+    blockRadius: trunkRadius + canopyRadius * 0.28,
+  });
+}
+
 function spawnPrey() {
   const id = nextId();
   const mesh = makeSphere(0xc5db78, rand(0.64, 0.95), 10);
   const p = randVec(WORLD.radius - 7);
   placeAtSurface(p, 0.68);
   mesh.position.copy(p);
+  const traits = {
+    speed: rand(0.25, 0.9),
+    stamina: rand(0.2, 0.8),
+    herbivore: rand(0.55, 0.98),
+    carnivore: rand(0.05, 0.35),
+    swim: rand(0.05, 0.55),
+    heat: rand(0.1, 0.65),
+    social: rand(0.2, 0.9),
+  };
+  const phenotypeDNA = randomPhenotypeDNA(id * 33 + 7, "prey", traits);
+  const phenotypeColor = phenotypeColorFromDNA("prey", phenotypeDNA, id * 71 + 11);
   applyPhenotype(
     mesh,
-    0xc5db78,
+    phenotypeColor,
     makePhenotypeProfile({
       seed: id * 33 + 7,
       role: "prey",
-      traits: {
-        speed: rand(0.25, 0.9),
-        stamina: rand(0.2, 0.8),
-        herbivore: rand(0.55, 0.98),
-        carnivore: rand(0.05, 0.35),
-        swim: rand(0.05, 0.55),
-        heat: rand(0.1, 0.65),
-        social: rand(0.2, 0.9),
-      },
+      traits,
+      dna: phenotypeDNA,
     })
   );
+  const edible = Math.random() > 0.13;
+  if (!edible) setPhenotypeTint(mesh, 0x8d9c90);
   scene.add(mesh);
   populations.prey.push({
     id,
@@ -2074,6 +2489,9 @@ function spawnPrey() {
     wander: randVec(1),
     alive: true,
     respawn: 0,
+    edible,
+    harm: edible ? 0 : rand(4.5, 8.5),
+    noEatCooldown: 0,
     speed: rand(4.2, 6.6),
     heightOffset: 0.68,
     social: rand(0.28, 0.92),
@@ -2086,21 +2504,25 @@ function spawnPredator() {
   const p = randVec(WORLD.radius - 10);
   placeAtSurface(p, 1.1);
   mesh.position.copy(p);
+  const traits = {
+    speed: rand(0.45, 0.95),
+    stamina: rand(0.3, 0.95),
+    herbivore: rand(0.0, 0.2),
+    carnivore: rand(0.65, 1.0),
+    swim: rand(0.0, 0.45),
+    heat: rand(0.2, 0.9),
+    social: rand(0.0, 0.5),
+  };
+  const phenotypeDNA = randomPhenotypeDNA(id * 61 + 13, "predator", traits);
+  const phenotypeColor = phenotypeColorFromDNA("predator", phenotypeDNA, id * 83 + 17);
   applyPhenotype(
     mesh,
-    0xce735e,
+    phenotypeColor,
     makePhenotypeProfile({
       seed: id * 61 + 13,
       role: "predator",
-      traits: {
-        speed: rand(0.45, 0.95),
-        stamina: rand(0.3, 0.95),
-        herbivore: rand(0.0, 0.2),
-        carnivore: rand(0.65, 1.0),
-        swim: rand(0.0, 0.45),
-        heat: rand(0.2, 0.9),
-        social: rand(0.0, 0.5),
-      },
+      traits,
+      dna: phenotypeDNA,
     })
   );
   scene.add(mesh);
@@ -2141,23 +2563,29 @@ function spawnAquatic() {
   const p = randomAquaticSpawnPoint();
   placeAtSurface(p, 0.34);
   mesh.position.copy(p);
+  const traits = {
+    speed: rand(0.32, 0.86),
+    stamina: rand(0.22, 0.72),
+    herbivore: rand(0.12, 0.58),
+    carnivore: rand(0.22, 0.82),
+    swim: rand(0.7, 1.0),
+    heat: rand(0.08, 0.58),
+    social: rand(0.35, 0.95),
+  };
+  const phenotypeDNA = randomPhenotypeDNA(id * 41 + 23, "aquatic", traits);
+  const phenotypeColor = phenotypeColorFromDNA("aquatic", phenotypeDNA, id * 59 + 5);
   applyPhenotype(
     mesh,
-    0x74c9e9,
+    phenotypeColor,
     makePhenotypeProfile({
       seed: id * 41 + 23,
       role: "aquatic",
-      traits: {
-        speed: rand(0.32, 0.86),
-        stamina: rand(0.22, 0.72),
-        herbivore: rand(0.12, 0.58),
-        carnivore: rand(0.22, 0.82),
-        swim: rand(0.7, 1.0),
-        heat: rand(0.08, 0.58),
-        social: rand(0.35, 0.95),
-      },
+      traits,
+      dna: phenotypeDNA,
     })
   );
+  const edible = Math.random() > 0.17;
+  if (!edible) setPhenotypeTint(mesh, 0x7f95a4);
   scene.add(mesh);
   populations.aquatic.push({
     id,
@@ -2166,6 +2594,9 @@ function spawnAquatic() {
     wander: randVec(1),
     alive: true,
     respawn: 0,
+    edible,
+    harm: edible ? 0 : rand(4, 7.2),
+    noEatCooldown: 0,
     speed: rand(3.6, 5.7),
     heightOffset: 0.34,
     school: rand(0.3, 0.96),
@@ -2179,23 +2610,29 @@ function spawnAvian() {
   const p = randVec(WORLD.radius - 8);
   placeAtSurface(p, rand(4.6, 7.8));
   mesh.position.copy(p);
+  const traits = {
+    speed: rand(0.45, 0.97),
+    stamina: rand(0.3, 0.85),
+    herbivore: rand(0.15, 0.62),
+    carnivore: rand(0.25, 0.78),
+    swim: rand(0.0, 0.3),
+    heat: rand(0.2, 0.9),
+    social: rand(0.4, 0.98),
+  };
+  const phenotypeDNA = randomPhenotypeDNA(id * 47 + 29, "avian", traits);
+  const phenotypeColor = phenotypeColorFromDNA("avian", phenotypeDNA, id * 97 + 7);
   applyPhenotype(
     mesh,
-    0xf1d889,
+    phenotypeColor,
     makePhenotypeProfile({
       seed: id * 47 + 29,
       role: "avian",
-      traits: {
-        speed: rand(0.45, 0.97),
-        stamina: rand(0.3, 0.85),
-        herbivore: rand(0.15, 0.62),
-        carnivore: rand(0.25, 0.78),
-        swim: rand(0.0, 0.3),
-        heat: rand(0.2, 0.9),
-        social: rand(0.4, 0.98),
-      },
+      traits,
+      dna: phenotypeDNA,
     })
   );
+  const edible = Math.random() > 0.22;
+  if (!edible) setPhenotypeTint(mesh, 0x9f8f7a);
   scene.add(mesh);
   populations.avian.push({
     id,
@@ -2204,6 +2641,9 @@ function spawnAvian() {
     wander: randVec(1),
     alive: true,
     respawn: 0,
+    edible,
+    harm: edible ? 0 : rand(3.4, 6.4),
+    noEatCooldown: 0,
     speed: rand(5.3, 8.5),
     altitude: rand(4.8, 8.6),
     flapPhase: rand(0, Math.PI * 2),
@@ -2239,6 +2679,8 @@ function spawnMateCluster() {
   const tone = toneProfile();
   const reqScale = tone.mateRequirementScale;
   const simpleMode = isSimpleReproductionMode();
+  const playerTraitsNow = sanitizeTraits(player.traits);
+  const playerDNANow = sanitizePhenotypeDNA(player.phenotypeDNA || randomPhenotypeDNA(player.morphSeed, "player", playerTraitsNow));
 
   const root = player.pos.clone();
   const angle = rand(0, Math.PI * 2);
@@ -2293,12 +2735,30 @@ function spawnMateCluster() {
       heat: clamp(0.35 + mods.heat, 0, 1),
       social: clamp(0.6 + mods.social, 0, 1),
     };
+    if (i === 0) {
+      for (const key of TRAIT_KEYS) {
+        mateTraits[key] = clamp(mateTraits[key] * 0.58 + playerTraitsNow[key] * 0.42, 0, 1);
+      }
+    } else if (mateCount > 2 && i === mateCount - 1) {
+      for (const key of TRAIT_KEYS) {
+        mateTraits[key] = clamp(mateTraits[key] * 0.72 + (1 - playerTraitsNow[key]) * 0.28, 0, 1);
+      }
+    }
+    const mateDNA = randomPhenotypeDNA(id * 23 + i * 11 + 5, "mate", mateTraits);
+    const mateColor = phenotypeColorFromDNA("mate", mateDNA, id * 67 + i * 13 + 17);
+    const compatibility = evaluateMateCompatibility(playerTraitsNow, playerDNANow, mateTraits, mateDNA);
     const phenotypeProfile = makePhenotypeProfile({
       seed: id * 19 + i,
       role: "mate",
       traits: mateTraits,
+      dna: mateDNA,
     });
     const offspringPreviewTraits = previewOffspringTraits(mods);
+    const offspringPreviewDNA = hybridizePhenotypeDNA(
+      player.phenotypeDNA,
+      mateDNA,
+      id * 89 + player.generation * 31
+    );
     const offspringPreviewHeritage = evolvePhenotypeHeritage({
       previousHeritage: player.phenotypeHeritage,
       parentTraits: player.traits,
@@ -2311,6 +2771,7 @@ function spawnMateCluster() {
       seed: id * 31 + player.generation * 97,
       role: "player",
       traits: offspringPreviewTraits,
+      dna: offspringPreviewDNA,
       generation: player.generation + 1,
       heritage: offspringPreviewHeritage,
     });
@@ -2321,8 +2782,11 @@ function spawnMateCluster() {
       mesh,
       mods,
       traits: mateTraits,
+      phenotypeDNA: mateDNA,
+      compatibility,
       phenotypeProfile,
       offspringPreviewTraits,
+      offspringPreviewDNA,
       offspringPreviewProfile,
       pulse: rand(0, Math.PI * 2),
       requirement,
@@ -2330,7 +2794,7 @@ function spawnMateCluster() {
       heightOffset: 1.2,
       marker: createMateMarker(mesh, `M${i + 1}`, `${i + 1}`),
     });
-    applyPhenotype(mesh, 0x9cd8ff, phenotypeProfile);
+    applyPhenotype(mesh, mateColor, phenotypeProfile);
   }
 
   if (!simpleMode) {
@@ -2340,21 +2804,25 @@ function spawnMateCluster() {
       const p = root.clone().add(randVec(14));
       placeAtSurface(p, 1.0);
       mesh.position.copy(p);
+      const rivalTraits = {
+        speed: rand(0.35, 0.85),
+        stamina: rand(0.25, 0.7),
+        herbivore: rand(0.2, 0.6),
+        carnivore: rand(0.2, 0.8),
+        swim: rand(0.0, 0.5),
+        heat: rand(0.2, 0.8),
+        social: rand(0.3, 0.75),
+      };
+      const rivalDNA = randomPhenotypeDNA(id * 17 + i * 19 + 9, "rival", rivalTraits);
+      const rivalColor = phenotypeColorFromDNA("rival", rivalDNA, id * 97 + 41);
       applyPhenotype(
         mesh,
-        0xf2b876,
+        rivalColor,
         makePhenotypeProfile({
           seed: id * 17 + i,
           role: "rival",
-          traits: {
-            speed: rand(0.35, 0.85),
-            stamina: rand(0.25, 0.7),
-            herbivore: rand(0.2, 0.6),
-            carnivore: rand(0.2, 0.8),
-            swim: rand(0.0, 0.5),
-            heat: rand(0.2, 0.8),
-            social: rand(0.3, 0.75),
-          },
+          traits: rivalTraits,
+          dna: rivalDNA,
         })
       );
       scene.add(mesh);
@@ -2377,6 +2845,7 @@ function spawnMateCluster() {
 function desiredPopulation() {
   return {
     flora: BALANCE.populations.floraBase + WORLD.tier * BALANCE.populations.floraPerTier,
+    trees: BALANCE.populations.treeBase + WORLD.tier * BALANCE.populations.treePerTier,
     prey: BALANCE.populations.preyBase + WORLD.tier * BALANCE.populations.preyPerTier,
     predators: BALANCE.gameplay.predatorsEnabled
       ? BALANCE.populations.predatorBase + WORLD.tier * BALANCE.populations.predatorPerTier
@@ -2389,11 +2858,13 @@ function desiredPopulation() {
 function syncPopulation() {
   const target = desiredPopulation();
   trimGroupToTarget(populations.flora, target.flora);
+  trimGroupToTarget(populations.trees, target.trees);
   trimGroupToTarget(populations.prey, target.prey);
   trimGroupToTarget(populations.predators, target.predators);
   trimGroupToTarget(populations.aquatic, target.aquatic);
   trimGroupToTarget(populations.avian, target.avian);
   while (populations.flora.length < target.flora) spawnFlora();
+  while (populations.trees.length < target.trees) spawnTree();
   while (populations.prey.length < target.prey) spawnPrey();
   while (populations.predators.length < target.predators) spawnPredator();
   while (populations.aquatic.length < target.aquatic) spawnAquatic();
@@ -2651,10 +3122,10 @@ function pulseNearbyForage() {
   let seeded = 0;
   for (const node of populations.flora) {
     if (seeded >= BALANCE.fun.rescueFloraCount) break;
-    if (!node.alive) continue;
+    if (!node.alive || node.edible === false) continue;
     const p = player.pos.clone().add(randVec(rand(3.5, 8.5)));
     limitToWorld(p);
-    placeAtSurface(p, 0.52);
+    placeAtSurface(p, node.heightOffset || 0.52);
     node.mesh.position.copy(p);
     applyFloraBiome(node);
     node.energy *= 1.18;
@@ -2751,11 +3222,13 @@ function isSimpleReproductionMode() {
 
 function reproductionThresholds() {
   const tone = toneProfile();
-  const ageMin = BALANCE.player.reproductionAgeMin * tone.reproductionAgeMult;
+  const fertility = clamp(player.fertilityQuality || 1, 0.5, 1.3);
+  const fertilityLoad = clamp(1 + (1 - fertility) * 0.5, 0.78, 1.26);
+  const ageMin = BALANCE.player.reproductionAgeMin * tone.reproductionAgeMult * fertilityLoad;
   const energyMin =
-    maxEnergy() * BALANCE.player.reproductionEnergyRatio * tone.reproductionEnergyMult;
+    maxEnergy() * BALANCE.player.reproductionEnergyRatio * tone.reproductionEnergyMult * fertilityLoad;
   const healthMin = clamp(
-    BALANCE.player.reproductionHealthMin + tone.reproductionHealthAdd,
+    BALANCE.player.reproductionHealthMin + tone.reproductionHealthAdd + (1 - fertility) * 10,
     5,
     95
   );
@@ -2767,6 +3240,7 @@ function reproductionThresholds() {
     ageMin,
     energyMin,
     healthMin,
+    fertility,
     readyAge,
     readyEnergy,
     readyHealth,
@@ -2948,7 +3422,13 @@ function selectMateById(id, silent) {
       selectedMateId = mate.id;
       if (!silent) {
         const summary = matePhenotypeDescriptor(mate.phenotypeProfile, mate.traits);
-        setActionMessage(`Mate M${mate.slot} selected: ${summary}. Move close, then press E.`, 2.2);
+        const match =
+          mate.compatibility ||
+          evaluateMateCompatibility(player.traits, player.phenotypeDNA, mate.traits, mate.phenotypeDNA);
+        setActionMessage(
+          `Mate M${mate.slot} selected: ${summary} (${Math.round(match.score * 100)}% ${match.tier}). Move close, then press E.`,
+          2.2
+        );
       }
       return true;
     }
@@ -3026,7 +3506,10 @@ function renderMateCards() {
       const selectedFlag = selected && mate.id === selected.id ? "1" : "0";
       const eligibleFlag = requirementMet(mate.requirement) ? "1" : "0";
       const dist = mate.mesh.position.distanceTo(player.mesh.position).toFixed(1);
-      return `${mate.id}:${selectedFlag}:${eligibleFlag}:${dist}:${mate.captured ? 1 : 0}`;
+      const compat =
+        mate.compatibility ||
+        evaluateMateCompatibility(player.traits, player.phenotypeDNA, mate.traits, mate.phenotypeDNA);
+      return `${mate.id}:${selectedFlag}:${eligibleFlag}:${dist}:${compat.score.toFixed(2)}:${mate.captured ? 1 : 0}`;
     })
     .join("|");
   if (mateCardsRenderKey === renderKey) return;
@@ -3040,6 +3523,13 @@ function renderMateCards() {
       const candidateTraits = mate.traits || sanitizeTraits(DEFAULT_TRAITS);
       const candidateProfile = mate.phenotypeProfile;
       const previewTraits = mate.offspringPreviewTraits || previewOffspringTraits(mate.mods);
+      const previewDNA =
+        mate.offspringPreviewDNA ||
+        hybridizePhenotypeDNA(
+          player.phenotypeDNA,
+          mate.phenotypeDNA || randomPhenotypeDNA(mate.id * 43 + 7, "mate", candidateTraits),
+          mate.id * 31 + player.generation * 101
+        );
       const previewHeritage = evolvePhenotypeHeritage({
         previousHeritage: player.phenotypeHeritage,
         parentTraits: player.traits,
@@ -3054,9 +3544,14 @@ function renderMateCards() {
           seed: mate.id * 31 + player.generation * 97,
           role: "player",
           traits: previewTraits,
+          dna: previewDNA,
           generation: player.generation + 1,
           heritage: previewHeritage,
         });
+      const compatibility =
+        mate.compatibility ||
+        evaluateMateCompatibility(player.traits, player.phenotypeDNA, candidateTraits, mate.phenotypeDNA);
+      const compatibilityPct = Math.round(compatibility.score * 100);
       const candidateSummary = matePhenotypeDescriptor(candidateProfile, candidateTraits);
       const previewSummary = matePhenotypeDescriptor(previewProfile, previewTraits);
       const cardClass = `mate-card${isSelected ? " selected" : ""}${eligible ? "" : " locked"}`;
@@ -3070,6 +3565,7 @@ function renderMateCards() {
           <button class="mate-select" data-mate-select="${mate.id}" type="button">${buttonText}</button>
         </div>
         <div class="mate-line">Phenotype: ${candidateSummary}</div>
+        <div class="mate-line">Species: ${compatibility.mateSpeciesLabel} | Match: ${compatibilityPct}% (${compatibility.tier})</div>
         <div class="mate-line">Select key: press ${mate.slot}</div>
         <div class="mate-line">Genotype pull: ${mateGenePullSummary(mate, 3)}</div>
         <div class="mate-line">Offspring forecast: ${previewSummary}</div>
@@ -3200,11 +3696,26 @@ function updateMateLockVisual(state, selectedMate) {
 
 function consumeFlora(node) {
   node.alive = false;
+  const edible = node.edible !== false;
+  const toxic = !!node.toxic;
   node.respawn =
     rand(BALANCE.feeding.floraRespawnMin, BALANCE.feeding.floraRespawnMax) /
     (1 + WORLD.tier * BALANCE.feeding.floraTierRespawnScale);
+  if (!edible) node.respawn *= 0.7;
   node.respawn *= node.respawnMult || 1;
   node.mesh.visible = false;
+  if (!edible) {
+    const harm = (node.harm || 4.5) * (toxic ? 1.15 : 1.0);
+    player.energy = clamp(player.energy - (toxic ? 6.5 : 3.5), 0, maxEnergy());
+    damagePlayer(harm);
+    setActionMessage(
+      toxic
+        ? `Avoid ${node.variant ? node.variant.label : "spore flora"}: toxic and inedible.`
+        : `Avoid ${node.variant ? node.variant.label : "thorn flora"}: inedible.`,
+      1.9
+    );
+    return;
+  }
   const baseEnergy = node.energy * (BALANCE.feeding.floraGainBase + player.traits.herbivore);
   const baseHealth = BALANCE.player.floraHealthGain * (0.65 + player.traits.herbivore * 0.35);
   const reward = registerConsumption("flora", baseEnergy, baseHealth);
@@ -3215,6 +3726,20 @@ function consumeFlora(node) {
 }
 
 function consumePrey(prey) {
+  if (prey.edible === false) {
+    prey.noEatCooldown = 2.2;
+    damagePlayer(prey.harm || 5.5);
+    player.energy = clamp(player.energy - 2.8, 0, maxEnergy());
+    const escape = prey.mesh.position.clone().sub(player.mesh.position).setY(0);
+    if (escape.lengthSq() > 0.0001) {
+      escape.normalize().multiplyScalar(2.1);
+      prey.mesh.position.add(escape);
+      limitToWorld(prey.mesh.position);
+      prey.mesh.position.y = terrainHeightAt(prey.mesh.position.x, prey.mesh.position.z) + prey.heightOffset;
+    }
+    setActionMessage("This prey species is not digestible.", 1.5);
+    return;
+  }
   prey.alive = false;
   prey.respawn =
     rand(BALANCE.feeding.preyRespawnMin, BALANCE.feeding.preyRespawnMax) /
@@ -3237,6 +3762,20 @@ function consumePrey(prey) {
 }
 
 function consumeAquatic(entity) {
+  if (entity.edible === false) {
+    entity.noEatCooldown = 2.2;
+    damagePlayer(entity.harm || 4.8);
+    player.energy = clamp(player.energy - 2.1, 0, maxEnergy());
+    const escape = entity.mesh.position.clone().sub(player.mesh.position).setY(0);
+    if (escape.lengthSq() > 0.0001) {
+      escape.normalize().multiplyScalar(2.3);
+      entity.mesh.position.add(escape);
+      limitToWorld(entity.mesh.position);
+      entity.mesh.position.y = terrainHeightAt(entity.mesh.position.x, entity.mesh.position.z) + entity.heightOffset;
+    }
+    setActionMessage("This aquatic species is inedible.", 1.4);
+    return;
+  }
   entity.alive = false;
   entity.respawn = rand(BALANCE.feeding.aquaticRespawnMin, BALANCE.feeding.aquaticRespawnMax);
   entity.mesh.visible = false;
@@ -3252,6 +3791,21 @@ function consumeAquatic(entity) {
 }
 
 function consumeAvian(entity) {
+  if (entity.edible === false) {
+    entity.noEatCooldown = 2.4;
+    damagePlayer(entity.harm || 4.2);
+    player.energy = clamp(player.energy - 1.8, 0, maxEnergy());
+    const escape = entity.mesh.position.clone().sub(player.mesh.position).setY(0);
+    if (escape.lengthSq() > 0.0001) {
+      escape.normalize().multiplyScalar(2.5);
+      entity.mesh.position.add(escape);
+      limitToWorld(entity.mesh.position);
+      const groundY = terrainHeightAt(entity.mesh.position.x, entity.mesh.position.z);
+      entity.mesh.position.y = groundY + (entity.altitude || 5.5);
+    }
+    setActionMessage("This avian species is inedible.", 1.4);
+    return;
+  }
   entity.alive = false;
   entity.respawn = rand(BALANCE.feeding.avianRespawnMin, BALANCE.feeding.avianRespawnMax);
   entity.mesh.visible = false;
@@ -3283,13 +3837,37 @@ function updateFlora(dt) {
       node.respawn -= dt;
       if (node.respawn <= 0) {
         node.alive = true;
-        respawnEntity(node, WORLD.radius * 0.1, WORLD.radius - 6, 0.52);
+        respawnEntity(node, WORLD.radius * 0.1, WORLD.radius - 6, node.heightOffset || 0.52);
         applyFloraBiome(node);
       }
       continue;
     }
     const dist = node.mesh.position.distanceTo(player.mesh.position);
     if (dist < 2.15) consumeFlora(node);
+  }
+}
+
+function updateTrees(dt) {
+  for (const tree of populations.trees) {
+    tree.swayPhase += dt * 0.55;
+    const sway = Math.sin(tree.swayPhase) * 0.06;
+    if (tree.canopyLow) tree.canopyLow.rotation.z = sway;
+    if (tree.canopyTop) tree.canopyTop.rotation.x = sway * 0.6;
+
+    const base = tree.mesh.position;
+    const dx = player.pos.x - base.x;
+    const dz = player.pos.z - base.z;
+    const dist2 = dx * dx + dz * dz;
+    const minDist = (tree.blockRadius || 0.8) + 0.55;
+    if (dist2 < minDist * minDist) {
+      const dist = Math.sqrt(dist2 + 0.0001);
+      const push = (minDist - dist) * 0.85;
+      player.pos.x += (dx / dist) * push;
+      player.pos.z += (dz / dist) * push;
+      limitToWorld(player.pos);
+      placeAtSurface(player.pos, PLAYER_HEIGHT_OFFSET);
+      player.mesh.position.copy(player.pos);
+    }
   }
 }
 
@@ -3300,12 +3878,14 @@ function updatePrey(dt) {
       if (prey.respawn <= 0) {
         prey.alive = true;
         prey.wander = randVec(1);
+        prey.noEatCooldown = 0;
         respawnEntity(prey, WORLD.radius * 0.14, WORLD.radius - 8, prey.heightOffset);
       }
       continue;
     }
 
     const pos = prey.mesh.position;
+    prey.noEatCooldown = Math.max(0, (prey.noEatCooldown || 0) - dt);
     let desired = prey.wander.clone();
 
     const toPlayer = chaseProbe.copy(player.mesh.position).sub(pos);
@@ -3400,7 +3980,7 @@ function updatePrey(dt) {
     }
 
     const catchDist = pos.distanceTo(player.mesh.position);
-    if (catchDist < 1.78 && player.vel.length() > prey.speed * 0.32) {
+    if (prey.noEatCooldown <= 0 && catchDist < 1.78 && player.vel.length() > prey.speed * 0.32) {
       consumePrey(prey);
     }
 
@@ -3416,6 +3996,7 @@ function respawnAquatic(entity) {
   entity.mesh.visible = true;
   entity.wander = randVec(1);
   entity.vel.set(0, 0, 0);
+  entity.noEatCooldown = 0;
 }
 
 function updateAquatic(dt) {
@@ -3427,6 +4008,7 @@ function updateAquatic(dt) {
     }
 
     const pos = entity.mesh.position;
+    entity.noEatCooldown = Math.max(0, (entity.noEatCooldown || 0) - dt);
     let desired = entity.wander.clone();
     const hereBiome = biomeAtXZ(pos.x, pos.z);
     if (!biomeIsWaterLike(hereBiome)) {
@@ -3480,7 +4062,11 @@ function updateAquatic(dt) {
     pos.y = terrainHeightAt(pos.x, pos.z) + entity.heightOffset + Math.sin(entity.floatPhase) * 0.12;
 
     const catchDist = pos.distanceTo(player.mesh.position);
-    if (catchDist < 1.62 && (player.traits.swim > 0.2 || biomeIsWaterLike(biomeAt(player.pos)))) {
+    if (
+      entity.noEatCooldown <= 0 &&
+      catchDist < 1.62 &&
+      (player.traits.swim > 0.2 || biomeIsWaterLike(biomeAt(player.pos)))
+    ) {
       consumeAquatic(entity);
       continue;
     }
@@ -3498,6 +4084,7 @@ function respawnAvian(entity) {
   entity.mesh.visible = true;
   entity.wander = randVec(1);
   entity.vel.set(0, 0, 0);
+  entity.noEatCooldown = 0;
 }
 
 function updateAvian(dt) {
@@ -3509,6 +4096,7 @@ function updateAvian(dt) {
     }
 
     const pos = entity.mesh.position;
+    entity.noEatCooldown = Math.max(0, (entity.noEatCooldown || 0) - dt);
     let desired = entity.wander.clone();
     const toPlayer = chaseProbe.copy(player.mesh.position).sub(pos);
     const playerDist = toPlayer.length();
@@ -3555,7 +4143,12 @@ function updateAvian(dt) {
     pos.y = groundY + entity.altitude + Math.sin(entity.flapPhase) * 0.5;
 
     const verticalDelta = Math.abs(pos.y - player.mesh.position.y);
-    if (playerDist < 1.95 && verticalDelta < 2.7 && player.vel.length() > movementSpeed() * 0.34) {
+    if (
+      entity.noEatCooldown <= 0 &&
+      playerDist < 1.95 &&
+      verticalDelta < 2.7 &&
+      player.vel.length() > movementSpeed() * 0.34
+    ) {
       consumeAvian(entity);
       continue;
     }
@@ -4017,6 +4610,14 @@ function nextGeneration(mate) {
   const parentMorphTraits = sanitizeTraits(player.morphTraits || player.traits);
   const previousHeritage = sanitizeTraits(player.phenotypeHeritage || parentTraits);
   const mateTraits = sanitizeTraits(mate.traits || parentTraits);
+  const parentDNA = sanitizePhenotypeDNA(
+    player.phenotypeDNA || randomPhenotypeDNA(player.morphSeed + player.generation * 53, "player", parentTraits)
+  );
+  const mateDNA = sanitizePhenotypeDNA(
+    mate.phenotypeDNA || randomPhenotypeDNA(mate.id * 17 + player.generation * 13, "mate", mateTraits)
+  );
+  const compatibility =
+    mate.compatibility || evaluateMateCompatibility(parentTraits, parentDNA, mateTraits, mateDNA);
   const entry = {
     generation: player.generation,
     age: Number(player.age.toFixed(1)),
@@ -4034,7 +4635,13 @@ function nextGeneration(mate) {
   player.lineage.push(entry);
 
   const offspringTraits = evolveTraits(mate.mods);
+  const offspringDNA = hybridizePhenotypeDNA(
+    parentDNA,
+    mateDNA,
+    player.generation * 4099 + mate.id * 131
+  );
   player.traits = offspringTraits;
+  player.phenotypeDNA = offspringDNA;
   player.generation += 1;
   player.phenotypeHeritage = evolvePhenotypeHeritage({
     previousHeritage,
@@ -4050,8 +4657,20 @@ function nextGeneration(mate) {
   setWorldFromGeneration(player.generation);
   rebuildBiomeVisuals();
 
-  initPlayerLifecycle(BALANCE.player.offspringStartEnergyRatio);
-  player.reproductionCooldown = BALANCE.player.reproductionCooldownAfterBirth;
+  const compatibilityScore = clamp(compatibility.score || 0.5, 0.1, 1);
+  player.fertilityQuality = clamp(
+    player.fertilityQuality * 0.42 + (0.58 + compatibilityScore * 0.66) * 0.58,
+    0.5,
+    1.28
+  );
+  initPlayerLifecycle(
+    clamp(BALANCE.player.offspringStartEnergyRatio * (0.86 + compatibilityScore * 0.24), 0.58, 0.94)
+  );
+  player.reproductionCooldown = clamp(
+    BALANCE.player.reproductionCooldownAfterBirth * (1.18 - compatibilityScore * 0.32),
+    4,
+    22
+  );
 
   clearGroup(populations.mates);
   clearGroup(populations.rivals);
@@ -4107,9 +4726,12 @@ function tryReproduce() {
     return;
   }
 
+  const compatibility =
+    selectedMate.compatibility ||
+    evaluateMateCompatibility(player.traits, player.phenotypeDNA, selectedMate.traits, selectedMate.phenotypeDNA);
   nextGeneration(selectedMate);
   setActionMessage(
-    `Reproduction success with M${selectedMate.slot}. Offspring bias: ${mateGenePullSummary(selectedMate, 2)}.`,
+    `Reproduction success with M${selectedMate.slot} (${compatibility.tier} match). Offspring bias: ${mateGenePullSummary(selectedMate, 2)}.`,
     3.3
   );
 }
@@ -4142,6 +4764,7 @@ function hudText() {
   const phaseOn = matingPhase.active && matingPhase.timer > 0;
   const phaseSeconds = Math.max(0, Math.ceil(matingPhase.timer));
   const comboText = funState.comboCount > 1 ? ` | Combo x${funState.comboCount}` : "";
+  const fertilityPct = Math.round(req.fertility * 100);
 
   ui.lineage.textContent =
     `Generation ${player.generation} | Lineage entries ${lineageLen} | World tier ${WORLD.tier}`;
@@ -4150,7 +4773,7 @@ function hudText() {
   ui.status.textContent =
     `Energy ${energy}/${energyMax} | Health ${player.health.toFixed(0)} | Age ${player.age.toFixed(
       0
-    )} | Biome ${biomeName} | Reproduction ${ready}${comboText} | ${matingState} | Tone ${tone.label} | ${predatorMode}`;
+    )} | Biome ${biomeName} | Fertility ${fertilityPct}% | Reproduction ${ready}${comboText} | ${matingState} | Tone ${tone.label} | ${predatorMode}`;
   if (ui.repro) {
     const ageState = req.readyAge ? "OK" : "WAIT";
     const energyState = req.readyEnergy ? "OK" : "WAIT";
@@ -4187,7 +4810,20 @@ function hudText() {
       } else {
         const selectedMate = ensureSelectedMate();
         const selectedText = selectedMate
-          ? `M${selectedMate.slot} ${matePhenotypeDescriptor(selectedMate.phenotypeProfile, selectedMate.traits)}`
+          ? (() => {
+              const match =
+                selectedMate.compatibility ||
+                evaluateMateCompatibility(
+                  player.traits,
+                  player.phenotypeDNA,
+                  selectedMate.traits,
+                  selectedMate.phenotypeDNA
+                );
+              return `M${selectedMate.slot} ${matePhenotypeDescriptor(
+                selectedMate.phenotypeProfile,
+                selectedMate.traits
+              )} ${Math.round(match.score * 100)}% ${match.tier}`;
+            })()
           : "none";
         mateInfoLine = `Mating phase active (${phaseSeconds}s) | Selected: ${selectedText} | Use keys above mates (1/2/3), then press E in range.`;
       }
@@ -4232,14 +4868,14 @@ function hudText() {
       ui.telemetry.textContent = "Telemetry: hidden (press T)";
     } else {
       ui.telemetry.textContent =
-        `Telemetry fps ${telemetry.fps.toFixed(0)} | pop f:${populations.flora.length} p:${populations.prey.length} aq:${populations.aquatic.length} av:${populations.avian.length} c:${populations.predators.length}` +
+        `Telemetry fps ${telemetry.fps.toFixed(0)} | pop f:${populations.flora.length} tr:${populations.trees.length} p:${populations.prey.length} aq:${populations.aquatic.length} av:${populations.avian.length} c:${populations.predators.length}` +
         ` | lineage +${telemetry.births} / -${telemetry.deaths} | tone ${tone.label} | biome ${biomeName}`;
     }
   }
 
   if (ui.hint) {
     ui.hint.textContent =
-      "Move: WASD + Arrow steer (Up/Down throttle, Left/Right turn) | Sprint: Shift | Burst: Space | Focus: F | Map: G | Mating Call: button/E (150s window) | Select mate: press number shown above each mate (or click card) | Reproduce: press E when close | Aquatic prey: wetlands/coasts | Avian prey: skies/clearings | Tone: M | Predators: P | Telemetry: T | Save: K | Load: L | New: N | Debug: Tab | Pan: Shift+Drag";
+      "Move: WASD + Arrow steer (Up/Down throttle, Left/Right turn) | Sprint: Shift | Burst: Space | Focus: F | Map: G | Mating Call: button/E (150s window) | Select mate: press number shown above each mate (or click card) | Reproduce: press E when close | Flora/fauna vary: some species are inedible/toxic | Trees block movement | Aquatic prey: wetlands/coasts | Avian prey: skies/clearings | Tone: M | Predators: P | Telemetry: T | Save: K | Load: L | New: N | Debug: Tab | Pan: Shift+Drag";
   }
 }
 
@@ -4257,7 +4893,7 @@ function debugText() {
 
   ui.debug.textContent = [
     `tone=${tone.id}(${tone.label})`,
-    `flora=${populations.flora.length} prey=${populations.prey.length} aquatic=${populations.aquatic.length} avian=${populations.avian.length} predators=${populations.predators.length}`,
+    `flora=${populations.flora.length} trees=${populations.trees.length} prey=${populations.prey.length} aquatic=${populations.aquatic.length} avian=${populations.avian.length} predators=${populations.predators.length}`,
     `plants=${m.plants} prey=${m.prey} chase=${m.chaseSuccess}/${m.chaseAttempts}`,
     `combo=${funState.comboCount}x(${funState.comboMultiplier.toFixed(2)}) objectiveChain=${funState.objectiveChain}`,
     `objective=${funState.objective ? `${funState.objective.type}:${objectiveProgressLabel(funState.objective)}` : "none"}`,
@@ -4626,6 +5262,12 @@ function drawMinimap() {
     drawEntity(f.mesh.position.x, f.mesh.position.z, 1.4, "#4ca145", 0.78);
   }
 
+  for (let i = 0; i < populations.trees.length; i += 2) {
+    const tree = populations.trees[i];
+    if (!tree) continue;
+    drawEntity(tree.mesh.position.x, tree.mesh.position.z, 1.9, "#2f7c38", 0.86);
+  }
+
   for (const prey of populations.prey) {
     if (!prey.alive) continue;
     drawEntity(prey.mesh.position.x, prey.mesh.position.z, 1.8, "#b7d86d", 0.92);
@@ -4707,7 +5349,7 @@ function drawMinimap() {
     const rivalLegend = isSimpleReproductionMode() ? "" : " | Orange=Rivals";
     ui.mapLegend.textContent = `Map: G | Radius ${range.toFixed(
       0
-    )}m | Ivory=You | Blue=aquatic | Sun=avian | Gold=selected mate | ${mateLegend}${rivalLegend}`;
+    )}m | Ivory=You | Green=trees | Blue=aquatic | Sun=avian | Gold=selected mate | ${mateLegend}${rivalLegend}`;
   }
 }
 
@@ -4741,6 +5383,7 @@ function frame() {
 
   updatePlayer(dt);
   updateFlora(dt);
+  updateTrees(dt);
   updatePrey(dt);
   updateAquatic(dt);
   updateAvian(dt);

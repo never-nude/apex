@@ -9,6 +9,7 @@ Minimal playable prototype aligned with the Apex ecosystem vision:
 - Data-driven trait drift from observed behavior metrics.
 - World tier expands ecological pressure over generations.
 - Trait-driven phenotype rigs: creatures get unique body shapes and appendages.
+- Phenotype DNA now differentiates every creature and produces hybrid offspring visuals.
 - Phenotype rigs are animated from locomotion speed (gait, tail sway, idle motion).
 - Player morphology now updates live during a generation from behavior telemetry.
 - Prey use flocking rules (alignment/cohesion/separation), and predators use light pack-hunt coordination.
@@ -55,6 +56,10 @@ Open: `http://127.0.0.1:8158`
   - feeding combo multipliers for faster, more rewarding loops
   - emergency forage surge when energy is critically low
   - sprint + burst traversal for stronger movement feel
+- Biodiversity pass adds:
+  - varied flora + fauna species (some edible, some inedible/toxic)
+  - tree populations that add terrain structure and movement blocking
+  - mate species compatibility tiers (ideal/viable/risky/fragile) that affect lineage fertility
 - Terrain now uses procedural texture + elevation, and entities follow surface height.
 - Telemetry shows FPS, populations, lineage events, tone, and biome.
 - Save snapshots persist to browser `localStorage` (`apex_sim_save_v1`) and autosave every 10 seconds.
