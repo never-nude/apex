@@ -27,6 +27,8 @@ Open: `http://127.0.0.1:8158`
 
 - `W A S D`: Camera-relative movement
 - `Arrow keys`: Steering controls (`Up/Down` throttle, `Left/Right` turn)
+- `Shift`: Sprint
+- `Space`: Burst movement (short dash with cooldown/energy cost)
 - `P`: Toggle predators on/off (for focused tuning sessions)
 - `F`: Focus camera on player organism
 - `G`: Toggle minimap/radar
@@ -48,6 +50,11 @@ Open: `http://127.0.0.1:8158`
 
 - Balancing constants are centralized in `main.js` under `BALANCE` for rapid tuning.
 - Tone profiles blend realism and charm with gameplay + phenotype effects.
+- Gameplay director pass adds:
+  - chained objectives with visible rewards (energy/health/trait boosts)
+  - feeding combo multipliers for faster, more rewarding loops
+  - emergency forage surge when energy is critically low
+  - sprint + burst traversal for stronger movement feel
 - Terrain now uses procedural texture + elevation, and entities follow surface height.
 - Telemetry shows FPS, populations, lineage events, tone, and biome.
 - Save snapshots persist to browser `localStorage` (`apex_sim_save_v1`) and autosave every 10 seconds.

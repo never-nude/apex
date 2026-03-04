@@ -31,29 +31,29 @@ const BALANCE = {
     moveSpeedFromTrait: 9.2,
     steerTurnRate: 2.7,
     steerReverseScale: 0.72,
-    reproductionAgeMin: 52,
-    reproductionEnergyRatio: 0.72,
+    reproductionAgeMin: 42,
+    reproductionEnergyRatio: 0.66,
     reproductionHealthMin: 35,
     reproductionInteractDistance: 3.4,
-    reproductionCooldownAfterFail: 18,
-    reproductionCooldownAfterBirth: 12,
+    reproductionCooldownAfterFail: 12,
+    reproductionCooldownAfterBirth: 10,
     matingPhaseDurationSeconds: 150,
     offspringStartEnergyRatio: 0.74,
     deathResetEnergyRatio: 0.68,
-    energyDrainBase: 0.4,
-    energyDrainMoveScale: 0.62,
+    energyDrainBase: 0.31,
+    energyDrainMoveScale: 0.5,
     scorchDrainScale: 0.95,
     wetlandDrainScale: 0.74,
     lowEnergyRatio: 0.22,
     lowEnergyDamageBase: 0.48,
     lowEnergyDamageHazardScale: 0.28,
-    passiveHealthRegen: 0.55,
-    earlyLifeGraceSeconds: 32,
-    earlyLifeDrainMult: 0.72,
-    lowEnergyDamageGraceSeconds: 20,
+    passiveHealthRegen: 0.7,
+    earlyLifeGraceSeconds: 42,
+    earlyLifeDrainMult: 0.64,
+    lowEnergyDamageGraceSeconds: 28,
     idleDrainScale: 0.44,
     idleThresholdRatio: 0.28,
-    idleEnergyRecovery: 0.26,
+    idleEnergyRecovery: 0.31,
     floraHealthGain: 1.2,
     preyHealthGain: 2.2,
     aquaticHealthGain: 1.7,
@@ -122,6 +122,30 @@ const BALANCE = {
     refreshMinSeconds: 2.4,
     refreshThreshold: 0.028,
     maxDietSum: 1.35,
+  },
+  fun: {
+    comboWindowSeconds: 7,
+    comboStep: 0.09,
+    comboMaxBonus: 0.78,
+    comboHealthScale: 0.45,
+    objectiveEnergyRewardBase: 12,
+    objectiveEnergyRewardScale: 2.2,
+    objectiveHealthRewardBase: 3,
+    objectiveHealthRewardScale: 0.75,
+    objectiveTraitRewardBase: 0.018,
+    objectiveTraitRewardScale: 0.0035,
+    rescueEnergyRatio: 0.3,
+    rescueEnergyBoost: 10,
+    rescueHealthBoost: 6,
+    rescueFloraCount: 5,
+    rescueCooldownSeconds: 22,
+    sprintSpeedMult: 1.18,
+    sprintDrainMult: 1.22,
+    burstSpeedMult: 1.5,
+    burstDurationSeconds: 0.85,
+    burstCooldownSeconds: 3.5,
+    burstEnergyCost: 7,
+    burstDrainPerSecond: 0.7,
   },
   save: {
     key: "apex_sim_save_v1",
@@ -228,6 +252,7 @@ const ui = {
   status: document.getElementById("status"),
   repro: document.getElementById("repro"),
   target: document.getElementById("target"),
+  objective: document.getElementById("objective"),
   matingCallBtn: document.getElementById("matingCallBtn"),
   mateCards: document.getElementById("mateCards"),
   mateInfo: document.getElementById("mateInfo"),
@@ -263,6 +288,18 @@ const telemetry = {
   sampleTime: 0,
   births: 0,
   deaths: 0,
+};
+
+const funState = {
+  comboCount: 0,
+  comboTimer: 0,
+  comboMultiplier: 1,
+  lastFeedAt: -999,
+  lastComboFlash: -999,
+  objective: null,
+  objectiveChain: 0,
+  objectiveCounter: 0,
+  rescueTimer: 0,
 };
 
 function toneProfile() {
@@ -1273,6 +1310,8 @@ const player = {
   morphSeed: 911,
   morphLabel: "balanced legged grazer",
   morphRefreshTimer: 0,
+  burstCooldown: 0,
+  burstTimer: 0,
   marker: null,
   metrics: resetMetrics(),
 };
@@ -1706,10 +1745,13 @@ function initPlayerLifecycle(startEnergyRatio) {
   player.energy = maxEnergy() * startEnergyRatio;
   player.reproductionCooldown = 0;
   player.morphRefreshTimer = 0;
+  player.burstCooldown = 0;
+  player.burstTimer = 0;
   player.metrics = resetMetrics();
   player.mesh.position.copy(player.pos);
   matingPhase.active = false;
   matingPhase.timer = 0;
+  clearFunLoopState(false);
 }
 
 function storageSupported() {
@@ -1733,6 +1775,9 @@ function saveSnapshot(reason) {
     telemetry: {
       births: telemetry.births,
       deaths: telemetry.deaths,
+    },
+    fun: {
+      objectiveChain: funState.objectiveChain,
     },
     player: {
       generation: player.generation,
@@ -1803,6 +1848,12 @@ function loadSnapshot() {
     telemetry.births = clamp(Number(parsed.telemetry.births) || 0, 0, 999999);
     telemetry.deaths = clamp(Number(parsed.telemetry.deaths) || 0, 0, 999999);
   }
+  if (parsed.fun) {
+    funState.objectiveChain = clamp(Math.floor(Number(parsed.fun.objectiveChain) || 0), 0, 9999);
+  } else {
+    const parsedGeneration = clamp(Math.floor(Number(parsed.player && parsed.player.generation) || 1), 1, 9999);
+    funState.objectiveChain = Math.max(0, parsedGeneration - 1);
+  }
 
   const state = parsed.player;
   player.generation = clamp(Math.floor(Number(state.generation) || 1), 1, 9999);
@@ -1828,6 +1879,8 @@ function loadSnapshot() {
   player.forward.set(0, 0, 1);
   player.energy = clamp(Number(state.energy) || maxEnergy() * BALANCE.player.offspringStartEnergyRatio, 0, maxEnergy());
   player.metrics = resetMetrics();
+  player.burstCooldown = 0;
+  player.burstTimer = 0;
   player.mesh.position.copy(player.pos);
 
   if (state.cam) {
@@ -1849,6 +1902,7 @@ function loadSnapshot() {
   clearGroup(populations.rivals);
   matingPhase.active = false;
   matingPhase.timer = 0;
+  clearFunLoopState(false);
 
   saveState.loadedFromDisk = true;
   saveState.lastSavedAt = Number(parsed.savedAt) || 0;
@@ -1873,6 +1927,7 @@ function newLineage(clearSave) {
   if (clearSave) clearSnapshot();
   telemetry.births = 0;
   telemetry.deaths = 0;
+  clearFunLoopState(true);
   player.generation = 1;
   player.traits = { ...DEFAULT_TRAITS };
   player.phenotypeHeritage = { ...DEFAULT_TRAITS };
@@ -2324,6 +2379,328 @@ function maxEnergy() {
 
 function movementSpeed() {
   return BALANCE.player.moveSpeedBase + player.traits.speed * BALANCE.player.moveSpeedFromTrait;
+}
+
+function clearFunLoopState(fullReset) {
+  funState.comboCount = 0;
+  funState.comboTimer = 0;
+  funState.comboMultiplier = 1;
+  funState.lastFeedAt = -999;
+  funState.lastComboFlash = -999;
+  funState.objective = null;
+  funState.rescueTimer = 0;
+  if (fullReset) {
+    funState.objectiveChain = 0;
+    funState.objectiveCounter = 0;
+  }
+}
+
+function applyTraitDelta(delta) {
+  let changed = false;
+  for (const key of TRAIT_KEYS) {
+    const next = Number(delta && delta[key]);
+    if (!Number.isFinite(next) || next === 0) continue;
+    player.traits[key] = clamp(player.traits[key] + next, 0, 1);
+    changed = true;
+  }
+
+  const dietSum = player.traits.herbivore + player.traits.carnivore;
+  if (dietSum > BALANCE.evolution.dietCap) {
+    player.traits.herbivore /= dietSum / BALANCE.evolution.dietCap;
+    player.traits.carnivore /= dietSum / BALANCE.evolution.dietCap;
+    changed = true;
+  }
+
+  if (changed) {
+    player.morphRefreshTimer = Math.max(
+      player.morphRefreshTimer,
+      BALANCE.phenotype.refreshMinSeconds
+    );
+  }
+}
+
+function registerConsumption(kind, energyGain, healthGain) {
+  const now = simTime;
+  const withinWindow = now - funState.lastFeedAt <= BALANCE.fun.comboWindowSeconds;
+  funState.comboCount = withinWindow ? funState.comboCount + 1 : 1;
+  funState.lastFeedAt = now;
+  funState.comboTimer = BALANCE.fun.comboWindowSeconds;
+
+  const bonus = clamp(
+    (funState.comboCount - 1) * BALANCE.fun.comboStep,
+    0,
+    BALANCE.fun.comboMaxBonus
+  );
+  funState.comboMultiplier = 1 + bonus;
+
+  if (funState.comboCount >= 3 && now - funState.lastComboFlash > 1.2) {
+    const label = kind === "flora" ? "Forage" : kind === "aquatic" ? "Aquatic" : kind === "avian" ? "Sky" : "Hunt";
+    setActionMessage(`${label} combo x${funState.comboCount} (${funState.comboMultiplier.toFixed(2)}x)`, 1.25);
+    funState.lastComboFlash = now;
+  }
+
+  return {
+    energy: energyGain * funState.comboMultiplier,
+    health: healthGain * (1 + bonus * BALANCE.fun.comboHealthScale),
+  };
+}
+
+function weightedPick(options) {
+  let total = 0;
+  for (const option of options) total += Math.max(0, Number(option.weight) || 0);
+  if (total <= 0) return options[0] || null;
+  let r = Math.random() * total;
+  for (const option of options) {
+    r -= Math.max(0, Number(option.weight) || 0);
+    if (r <= 0) return option;
+  }
+  return options[options.length - 1] || null;
+}
+
+function objectiveBiomeCandidates() {
+  const unlocked = [];
+  for (const config of Object.values(BIOMES)) {
+    if (config.id === BIOMES.meadow.id) continue;
+    if (WORLD.tier < config.unlockTier) continue;
+    unlocked.push(config.id);
+  }
+  return unlocked;
+}
+
+function createObjective() {
+  const previousType = funState.objective ? funState.objective.type : "";
+  const options = [
+    { type: "forage", weight: 2.2 },
+    { type: "travel", weight: 1.9 },
+    { type: "hunt", weight: 1.8 + WORLD.tier * 0.15 },
+  ];
+  if (WORLD.tier >= 2) options.push({ type: "biome", weight: 1.25 + WORLD.tier * 0.1 });
+  for (const entry of options) {
+    if (entry.type === previousType) entry.weight *= 0.45;
+  }
+  const picked = weightedPick(options) || { type: "forage" };
+  const chain = funState.objectiveChain;
+  const rewardEnergy =
+    BALANCE.fun.objectiveEnergyRewardBase +
+    WORLD.tier * 1.6 +
+    Math.min(28, chain * BALANCE.fun.objectiveEnergyRewardScale);
+  const rewardHealth =
+    BALANCE.fun.objectiveHealthRewardBase +
+    Math.min(9, chain * BALANCE.fun.objectiveHealthRewardScale);
+  const rewardTraitAmount = clamp(
+    BALANCE.fun.objectiveTraitRewardBase + chain * BALANCE.fun.objectiveTraitRewardScale,
+    0.012,
+    0.055
+  );
+  const objective = {
+    id: ++funState.objectiveCounter,
+    type: picked.type,
+    progress: 0,
+    rewardEnergy,
+    rewardHealth,
+    rewardTraitAmount,
+    rewardTrait: "stamina",
+    title: "",
+    target: 1,
+    startPlants: player.metrics.plants,
+    startPrey: player.metrics.prey,
+    startDistance: player.metrics.distance,
+    biomeId: BIOMES.meadow.id,
+  };
+
+  if (picked.type === "forage") {
+    objective.title = "Forage Sprint";
+    objective.target = clamp(3 + WORLD.tier + Math.floor(chain * 0.35), 3, 12);
+    objective.rewardTrait = "herbivore";
+    return objective;
+  }
+  if (picked.type === "hunt") {
+    objective.title = "Predation Trial";
+    objective.target = clamp(2 + Math.floor(WORLD.tier * 0.8) + Math.floor(chain * 0.3), 2, 10);
+    objective.rewardTrait = "carnivore";
+    return objective;
+  }
+  if (picked.type === "travel") {
+    objective.title = "Migration Run";
+    objective.target = clamp(52 + WORLD.tier * 14 + chain * 7, 52, 220);
+    objective.rewardTrait = "speed";
+    return objective;
+  }
+
+  const biomes = objectiveBiomeCandidates();
+  const biomeId = biomes.length > 0 ? biomes[(Math.random() * biomes.length) | 0] : BIOMES.rainforest.id;
+  objective.type = "biome";
+  objective.biomeId = biomeId;
+  objective.title = `Habitat Study (${biomeLabel(biomeId)})`;
+  objective.target = clamp(11 + WORLD.tier * 2 + chain * 1.2, 11, 34);
+  objective.rewardTrait =
+    biomeId === BIOMES.volcanic.id
+      ? "heat"
+      : biomeIsWaterLike(biomeId)
+        ? "swim"
+        : biomeId === BIOMES.rainforest.id
+          ? "social"
+          : "stamina";
+  return objective;
+}
+
+function objectiveProgressLabel(objective) {
+  if (!objective) return "Objective: initializing...";
+  const target = objective.target;
+  const progress = clamp(objective.progress, 0, target);
+  if (objective.type === "travel") {
+    return `${progress.toFixed(0)}/${target.toFixed(0)}m`;
+  }
+  if (objective.type === "biome") {
+    return `${progress.toFixed(1)}/${target.toFixed(1)}s`;
+  }
+  return `${Math.floor(progress)}/${Math.floor(target)}`;
+}
+
+function objectiveSummaryText(objective) {
+  if (!objective) return "Objective: calibrating ecosystem challenge...";
+  const reward = `+${objective.rewardEnergy.toFixed(0)}E +${objective.rewardHealth.toFixed(0)}H +${TRAIT_SHORT[objective.rewardTrait]} ${objective.rewardTraitAmount.toFixed(3)}`;
+  const progress = objectiveProgressLabel(objective);
+  return `Objective ${funState.objectiveChain + 1}: ${objective.title} ${progress} | Reward ${reward}`;
+}
+
+function completeObjective(objective) {
+  player.energy = clamp(player.energy + objective.rewardEnergy, 0, maxEnergy());
+  player.health = clamp(player.health + objective.rewardHealth, 0, 100);
+  const traitDelta = {};
+  traitDelta[objective.rewardTrait] = objective.rewardTraitAmount;
+  if (objective.type === "forage") traitDelta.stamina = (traitDelta.stamina || 0) + 0.007;
+  if (objective.type === "hunt") traitDelta.speed = (traitDelta.speed || 0) + 0.007;
+  if (objective.type === "travel") traitDelta.stamina = (traitDelta.stamina || 0) + 0.009;
+  if (objective.type === "biome" && objective.biomeId === BIOMES.rainforest.id) {
+    traitDelta.social = (traitDelta.social || 0) + 0.009;
+  }
+  applyTraitDelta(traitDelta);
+  player.reproductionCooldown = Math.max(0, player.reproductionCooldown - 2.5);
+  funState.objectiveChain += 1;
+  setActionMessage(
+    `Objective complete: ${objective.title}. +${objective.rewardEnergy.toFixed(0)} energy, +${objective.rewardHealth.toFixed(0)} health.`,
+    3.1
+  );
+  funState.objective = null;
+}
+
+function ensureObjective() {
+  if (funState.objective) return;
+  funState.objective = createObjective();
+  if (actionMessageTimer <= 0.25) {
+    setActionMessage(`New objective: ${funState.objective.title}.`, 2.4);
+  }
+}
+
+function progressObjective(dt) {
+  const objective = funState.objective;
+  if (!objective) return;
+  if (objective.type === "forage") {
+    objective.progress = Math.max(0, player.metrics.plants - objective.startPlants);
+  } else if (objective.type === "hunt") {
+    objective.progress = Math.max(0, player.metrics.prey - objective.startPrey);
+  } else if (objective.type === "travel") {
+    objective.progress = Math.max(0, player.metrics.distance - objective.startDistance);
+  } else if (objective.type === "biome") {
+    if (biomeAt(player.pos) === objective.biomeId) {
+      objective.progress += dt;
+    }
+  }
+  if (objective.progress >= objective.target) completeObjective(objective);
+}
+
+function pulseNearbyForage() {
+  let seeded = 0;
+  for (const node of populations.flora) {
+    if (seeded >= BALANCE.fun.rescueFloraCount) break;
+    if (!node.alive) continue;
+    const p = player.pos.clone().add(randVec(rand(3.5, 8.5)));
+    limitToWorld(p);
+    placeAtSurface(p, 0.52);
+    node.mesh.position.copy(p);
+    applyFloraBiome(node);
+    node.energy *= 1.18;
+    node.mesh.material.emissive.setHex(0x2c5a1f);
+    node.mesh.material.emissiveIntensity = 0.18;
+    seeded += 1;
+  }
+}
+
+function updateFunLoop(dt) {
+  if (funState.comboTimer > 0) {
+    funState.comboTimer = Math.max(0, funState.comboTimer - dt);
+    if (funState.comboTimer <= 0) {
+      funState.comboCount = 0;
+      funState.comboMultiplier = 1;
+    }
+  }
+
+  funState.rescueTimer = Math.max(0, funState.rescueTimer - dt);
+  ensureObjective();
+  progressObjective(dt);
+
+  if (
+    funState.rescueTimer <= 0 &&
+    player.energy < maxEnergy() * BALANCE.fun.rescueEnergyRatio &&
+    player.health > 0
+  ) {
+    funState.rescueTimer = BALANCE.fun.rescueCooldownSeconds;
+    pulseNearbyForage();
+    player.energy = clamp(player.energy + BALANCE.fun.rescueEnergyBoost, 0, maxEnergy());
+    player.health = clamp(player.health + BALANCE.fun.rescueHealthBoost, 0, 100);
+    setActionMessage("Nature surge: forage clustered nearby and recovery boosted.", 2.4);
+  }
+}
+
+function burstDirectionFromInput() {
+  const forward = moveForward.copy(player.pos).sub(camera.position);
+  forward.y = 0;
+  if (forward.lengthSq() < 0.0001) {
+    forward.set(-Math.sin(camYaw), 0, -Math.cos(camYaw));
+  } else {
+    forward.normalize();
+  }
+
+  const right = moveRight.crossVectors(forward, worldUp);
+  if (right.lengthSq() < 0.0001) {
+    right.set(1, 0, 0);
+  } else {
+    right.normalize();
+  }
+
+  const dir = new THREE.Vector3();
+  if (KEY.KeyW) dir.add(forward);
+  if (KEY.KeyS) dir.sub(forward);
+  if (KEY.KeyA) dir.sub(right);
+  if (KEY.KeyD) dir.add(right);
+  const throttle = (KEY.ArrowUp ? 1 : 0) - (KEY.ArrowDown ? 1 : 0);
+  if (throttle !== 0) {
+    const scale = throttle > 0 ? 1 : BALANCE.player.steerReverseScale;
+    dir.addScaledVector(player.forward, throttle * scale);
+  }
+  if (dir.lengthSq() < 0.0001) return player.forward.clone();
+  return dir.normalize();
+}
+
+function tryBurstMove() {
+  if (player.burstCooldown > 0) {
+    setActionMessage(`Burst cooldown ${player.burstCooldown.toFixed(1)}s`, 1.05);
+    return;
+  }
+  if (player.energy < BALANCE.fun.burstEnergyCost) {
+    setActionMessage("Need more energy for burst movement.", 1.3);
+    return;
+  }
+
+  const dir = burstDirectionFromInput();
+  player.forward.lerp(dir, 0.75).normalize();
+  const impulse = movementSpeed() * (0.9 + BALANCE.fun.burstSpeedMult * 0.8);
+  player.vel.addScaledVector(dir, impulse);
+  player.burstTimer = BALANCE.fun.burstDurationSeconds;
+  player.burstCooldown = BALANCE.fun.burstCooldownSeconds;
+  player.energy = clamp(player.energy - BALANCE.fun.burstEnergyCost, 0, maxEnergy());
+  setActionMessage("Burst engaged.", 1.1);
 }
 
 function canReproduce() {
@@ -2791,13 +3168,12 @@ function consumeFlora(node) {
     (1 + WORLD.tier * BALANCE.feeding.floraTierRespawnScale);
   node.respawn *= node.respawnMult || 1;
   node.mesh.visible = false;
-  const gain = node.energy * (BALANCE.feeding.floraGainBase + player.traits.herbivore);
-  player.energy = clamp(player.energy + gain, 0, maxEnergy());
-  player.health = clamp(
-    player.health + BALANCE.player.floraHealthGain * (0.65 + player.traits.herbivore * 0.35),
-    0,
-    100
-  );
+  const baseEnergy = node.energy * (BALANCE.feeding.floraGainBase + player.traits.herbivore);
+  const baseHealth = BALANCE.player.floraHealthGain * (0.65 + player.traits.herbivore * 0.35);
+  const reward = registerConsumption("flora", baseEnergy, baseHealth);
+  player.energy = clamp(player.energy + reward.energy, 0, maxEnergy());
+  player.health = clamp(player.health + reward.health, 0, 100);
+  applyTraitDelta({ herbivore: 0.0016, stamina: 0.0008 });
   player.metrics.plants += 1;
 }
 
@@ -2807,15 +3183,14 @@ function consumePrey(prey) {
     rand(BALANCE.feeding.preyRespawnMin, BALANCE.feeding.preyRespawnMax) /
     (1 + WORLD.tier * BALANCE.feeding.preyTierRespawnScale);
   prey.mesh.visible = false;
-  const gain =
+  const baseEnergy =
     rand(BALANCE.feeding.preyEnergyMin, BALANCE.feeding.preyEnergyMax) *
     (BALANCE.feeding.preyGainBase + player.traits.carnivore);
-  player.energy = clamp(player.energy + gain, 0, maxEnergy());
-  player.health = clamp(
-    player.health + BALANCE.player.preyHealthGain * (0.65 + player.traits.carnivore * 0.35),
-    0,
-    100
-  );
+  const baseHealth = BALANCE.player.preyHealthGain * (0.65 + player.traits.carnivore * 0.35);
+  const reward = registerConsumption("prey", baseEnergy, baseHealth);
+  player.energy = clamp(player.energy + reward.energy, 0, maxEnergy());
+  player.health = clamp(player.health + reward.health, 0, 100);
+  applyTraitDelta({ carnivore: 0.0017, speed: 0.001, stamina: 0.0004 });
   player.metrics.prey += 1;
   const stamp = ACTIVE_CHASE.get(prey.id);
   if (stamp !== undefined && stamp > simTime - BALANCE.feeding.chaseSuccessWindow) {
@@ -2828,15 +3203,14 @@ function consumeAquatic(entity) {
   entity.alive = false;
   entity.respawn = rand(BALANCE.feeding.aquaticRespawnMin, BALANCE.feeding.aquaticRespawnMax);
   entity.mesh.visible = false;
-  const gain =
+  const baseEnergy =
     rand(BALANCE.feeding.aquaticEnergyMin, BALANCE.feeding.aquaticEnergyMax) *
     (BALANCE.feeding.aquaticGainBase + player.traits.swim * 0.58 + player.traits.carnivore * 0.24);
-  player.energy = clamp(player.energy + gain, 0, maxEnergy());
-  player.health = clamp(
-    player.health + BALANCE.player.aquaticHealthGain * (0.64 + player.traits.swim * 0.36),
-    0,
-    100
-  );
+  const baseHealth = BALANCE.player.aquaticHealthGain * (0.64 + player.traits.swim * 0.36);
+  const reward = registerConsumption("aquatic", baseEnergy, baseHealth);
+  player.energy = clamp(player.energy + reward.energy, 0, maxEnergy());
+  player.health = clamp(player.health + reward.health, 0, 100);
+  applyTraitDelta({ swim: 0.0018, carnivore: 0.0009, stamina: 0.0005 });
   player.metrics.prey += 1;
 }
 
@@ -2844,15 +3218,14 @@ function consumeAvian(entity) {
   entity.alive = false;
   entity.respawn = rand(BALANCE.feeding.avianRespawnMin, BALANCE.feeding.avianRespawnMax);
   entity.mesh.visible = false;
-  const gain =
+  const baseEnergy =
     rand(BALANCE.feeding.avianEnergyMin, BALANCE.feeding.avianEnergyMax) *
     (BALANCE.feeding.avianGainBase + player.traits.speed * 0.44 + player.traits.carnivore * 0.24);
-  player.energy = clamp(player.energy + gain, 0, maxEnergy());
-  player.health = clamp(
-    player.health + BALANCE.player.avianHealthGain * (0.62 + player.traits.speed * 0.38),
-    0,
-    100
-  );
+  const baseHealth = BALANCE.player.avianHealthGain * (0.62 + player.traits.speed * 0.38);
+  const reward = registerConsumption("avian", baseEnergy, baseHealth);
+  player.energy = clamp(player.energy + reward.energy, 0, maxEnergy());
+  player.health = clamp(player.health + reward.health, 0, 100);
+  applyTraitDelta({ speed: 0.0018, social: 0.0007, carnivore: 0.0007 });
   player.metrics.prey += 1;
 }
 
@@ -3415,6 +3788,8 @@ function updatePlayer(dt) {
   const tone = toneProfile();
   player.age += dt;
   player.reproductionCooldown = Math.max(0, player.reproductionCooldown - dt);
+  player.burstCooldown = Math.max(0, player.burstCooldown - dt);
+  player.burstTimer = Math.max(0, player.burstTimer - dt);
 
   const forward = moveForward.copy(player.pos).sub(camera.position);
   forward.y = 0;
@@ -3465,7 +3840,14 @@ function updatePlayer(dt) {
     player.metrics.activeTime += dt;
   }
 
-  const moveSpd = movementSpeed();
+  const isSprinting =
+    (KEY.ShiftLeft || KEY.ShiftRight) &&
+    input.lengthSq() > 0.001 &&
+    player.energy > maxEnergy() * 0.08;
+  const baseMoveSpd = movementSpeed();
+  let moveSpd = baseMoveSpd;
+  if (isSprinting) moveSpd *= BALANCE.fun.sprintSpeedMult;
+  if (player.burstTimer > 0) moveSpd *= BALANCE.fun.burstSpeedMult;
   const targetVel = input.multiplyScalar(moveSpd);
   player.vel.lerp(targetVel, dt * 7.5);
   const moveDelta = player.vel.clone().multiplyScalar(dt);
@@ -3484,6 +3866,8 @@ function updatePlayer(dt) {
   const idleBlend = speedRatio >= idleThreshold ? 1 : speedRatio / idleThreshold;
   const idleDrainScale = BALANCE.player.idleDrainScale + (1 - BALANCE.player.idleDrainScale) * idleBlend;
   energyDrain *= idleDrainScale;
+  if (isSprinting) energyDrain *= BALANCE.fun.sprintDrainMult;
+  if (player.burstTimer > 0) energyDrain += BALANCE.fun.burstDrainPerSecond * dt;
 
   if (biome === BIOMES.volcanic.id) {
     player.metrics.heatExposure += dt;
@@ -3720,6 +4104,7 @@ function hudText() {
   const reproAction = reproductionActionState();
   const phaseOn = matingPhase.active && matingPhase.timer > 0;
   const phaseSeconds = Math.max(0, Math.ceil(matingPhase.timer));
+  const comboText = funState.comboCount > 1 ? ` | Combo x${funState.comboCount}` : "";
 
   ui.lineage.textContent =
     `Generation ${player.generation} | Lineage entries ${lineageLen} | World tier ${WORLD.tier}`;
@@ -3728,7 +4113,7 @@ function hudText() {
   ui.status.textContent =
     `Energy ${energy}/${energyMax} | Health ${player.health.toFixed(0)} | Age ${player.age.toFixed(
       0
-    )} | Biome ${biomeName} | Reproduction ${ready} | ${matingState} | Tone ${tone.label} | ${predatorMode}`;
+    )} | Biome ${biomeName} | Reproduction ${ready}${comboText} | ${matingState} | Tone ${tone.label} | ${predatorMode}`;
   if (ui.repro) {
     const ageState = req.readyAge ? "OK" : "WAIT";
     const energyState = req.readyEnergy ? "OK" : "WAIT";
@@ -3751,6 +4136,10 @@ function hudText() {
       actionMessageTimer > 0 && actionMessage
         ? `${actionLine} | ${actionMessage}`
         : actionLine;
+  }
+
+  if (ui.objective) {
+    ui.objective.textContent = objectiveSummaryText(funState.objective);
   }
 
   if (ui.mateInfo) {
@@ -3813,7 +4202,7 @@ function hudText() {
 
   if (ui.hint) {
     ui.hint.textContent =
-      "Move: WASD + Arrow steer (Up/Down throttle, Left/Right turn) | Focus: F | Map: G | Mating Call: button/E (150s window) | Select mate: press number shown above each mate (or click card) | Reproduce: press E when close | Aquatic prey: wetlands/coasts | Avian prey: skies/clearings | Tone: M | Predators: P | Telemetry: T | Save: K | Load: L | New: N | Debug: Tab | Pan: Shift+Drag";
+      "Move: WASD + Arrow steer (Up/Down throttle, Left/Right turn) | Sprint: Shift | Burst: Space | Focus: F | Map: G | Mating Call: button/E (150s window) | Select mate: press number shown above each mate (or click card) | Reproduce: press E when close | Aquatic prey: wetlands/coasts | Avian prey: skies/clearings | Tone: M | Predators: P | Telemetry: T | Save: K | Load: L | New: N | Debug: Tab | Pan: Shift+Drag";
   }
 }
 
@@ -3833,6 +4222,8 @@ function debugText() {
     `tone=${tone.id}(${tone.label})`,
     `flora=${populations.flora.length} prey=${populations.prey.length} aquatic=${populations.aquatic.length} avian=${populations.avian.length} predators=${populations.predators.length}`,
     `plants=${m.plants} prey=${m.prey} chase=${m.chaseSuccess}/${m.chaseAttempts}`,
+    `combo=${funState.comboCount}x(${funState.comboMultiplier.toFixed(2)}) objectiveChain=${funState.objectiveChain}`,
+    `objective=${funState.objective ? `${funState.objective.type}:${objectiveProgressLabel(funState.objective)}` : "none"}`,
     `threatEscapes=${m.threatEscapes}/${m.threatEvents}`,
     `body="${player.morphLabel}" morphDelta=${traitDistance(player.morphTraits, player.renderedMorphTraits).toFixed(3)}`,
     `heat=${m.heatExposure.toFixed(1)} water=${m.waterExposure.toFixed(1)} social=${m.socialExposure.toFixed(1)}`,
@@ -4070,10 +4461,11 @@ if (ui.mateCards) {
 }
 
 window.addEventListener("keydown", (e) => {
-  if (e.code.startsWith("Arrow")) {
+  if (e.code.startsWith("Arrow") || e.code === "Space") {
     e.preventDefault();
   }
   KEY[e.code] = true;
+  if (e.code === "Space" && !e.repeat) tryBurstMove();
   if (e.code === "KeyE") tryReproduce();
   if (e.code === "KeyF") focusPlayerCamera(false);
   if (e.code === "KeyG") {
@@ -4318,6 +4710,7 @@ function frame() {
   updatePredators(dt);
   updateMatingPhase(dt);
   updateMatesAndRivals(dt);
+  updateFunLoop(dt);
   updatePlayerMorphology(dt);
   tryDeathReset();
   syncPopulation();
