@@ -988,67 +988,61 @@ function applyPhenotype(mesh, baseColor, profile) {
   rig.add(bodyOutline);
 
   const shoulder = new THREE.Mesh(
-    new THREE.CylinderGeometry(bodyRadius * 0.44, bodyRadius * 0.6, bodyRadius * 0.85, 10),
+    new THREE.SphereGeometry(bodyRadius * 0.5, 12, 10),
     accentMat
   );
-  shoulder.rotation.x = Math.PI / 2;
-  shoulder.position.set(0, profile.bodyScale.y * 0.02, profile.bodyScale.z * 0.38);
+  shoulder.scale.set(1.08, 0.74, 0.62);
+  shoulder.position.set(0, profile.bodyScale.y * 0.03, profile.bodyScale.z * 0.34);
   rig.add(shoulder);
 
   const hips = new THREE.Mesh(
-    new THREE.CylinderGeometry(bodyRadius * 0.55, bodyRadius * 0.48, bodyRadius * 0.82, 10),
+    new THREE.SphereGeometry(bodyRadius * 0.48, 12, 10),
     accentMat
   );
-  hips.rotation.x = Math.PI / 2;
-  hips.position.set(0, -profile.bodyScale.y * 0.02, -profile.bodyScale.z * 0.36);
+  hips.scale.set(1.04, 0.72, 0.64);
+  hips.position.set(0, -profile.bodyScale.y * 0.03, -profile.bodyScale.z * 0.32);
   rig.add(hips);
 
   const headRadius = profile.bodyRadius * 0.64;
-  const head = new THREE.Mesh(
-    new THREE.BoxGeometry(headRadius * 1.36, headRadius * 1.08, headRadius * 1.42, 2, 1, 2),
-    bodyMat
+  const head = new THREE.Mesh(new THREE.SphereGeometry(headRadius, 13, 11), bodyMat);
+  head.scale.set(
+    profile.headScale.x * 1.04,
+    profile.headScale.y * 0.88,
+    profile.headScale.z * 1.12
   );
-  head.scale.copy(profile.headScale);
   head.position.set(0, profile.bodyScale.y * 0.04, profile.bodyScale.z * 0.84);
   rig.add(head);
 
   const headOutline = new THREE.Mesh(head.geometry, outlineMat);
-  headOutline.scale.copy(profile.headScale).multiplyScalar(1.07);
+  headOutline.scale.copy(head.scale).multiplyScalar(1.07);
   headOutline.position.copy(head.position);
   rig.add(headOutline);
 
   const belly = new THREE.Mesh(
-    new THREE.CylinderGeometry(bodyRadius * 0.44, bodyRadius * 0.56, bodyLength * 0.78, 10),
+    new THREE.SphereGeometry(bodyRadius * 0.64, 11, 10),
     underMat
   );
-  belly.rotation.x = Math.PI / 2;
-  belly.scale.set(profile.bodyScale.x * 0.86, profile.bodyScale.y * 0.55, profile.bodyScale.z * 0.74);
+  belly.scale.set(profile.bodyScale.x * 0.9, profile.bodyScale.y * 0.5, profile.bodyScale.z * 0.7);
   belly.position.set(0, -profile.bodyScale.y * 0.23, profile.bodyScale.z * 0.05);
   rig.add(belly);
 
   for (let i = 0; i < profile.stripeCount; i += 1) {
     const patch = new THREE.Mesh(
-      new THREE.BoxGeometry(bodyRadius * 0.54, bodyRadius * 0.2, bodyRadius * 0.12, 1, 1, 1),
+      new THREE.SphereGeometry(bodyRadius * 0.22, 8, 7),
       markMat
     );
-    patch.scale.set(profile.bodyScale.x * 0.84, profile.bodyScale.y * 0.32, profile.bodyScale.z * 0.32);
+    patch.scale.set(profile.bodyScale.x * 1.02, profile.bodyScale.y * 0.34, profile.bodyScale.z * 0.36);
     patch.position.set(
       0,
       profile.bodyScale.y * (0.06 + i * 0.1),
       -profile.bodyScale.z * 0.38 + i * profile.bodyScale.z * 0.24
     );
-    patch.rotation.y = Math.PI / 2;
     markings.push(patch);
     rig.add(patch);
   }
 
   const snout = new THREE.Mesh(
-    new THREE.CylinderGeometry(
-      0.06 + profile.snoutLength * 0.1,
-      0.11 + profile.snoutLength * 0.13,
-      profile.snoutLength,
-      10
-    ),
+    new THREE.ConeGeometry(0.07 + profile.snoutLength * 0.09, profile.snoutLength * 0.94, 10),
     underMat
   );
   snout.rotation.x = Math.PI / 2;
@@ -1059,9 +1053,12 @@ function applyPhenotype(mesh, baseColor, profile) {
   );
   rig.add(snout);
 
-  const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.03, 0.07), mouthMat);
+  const mouth = new THREE.Mesh(
+    new THREE.TorusGeometry(0.07 + profile.snoutLength * 0.07, 0.01, 6, 12, Math.PI),
+    mouthMat
+  );
   mouth.position.set(0, snout.position.y - 0.03, snout.position.z + profile.snoutLength * 0.3);
-  mouth.rotation.x = Math.PI * 0.08;
+  mouth.rotation.x = Math.PI / 2;
   rig.add(mouth);
 
   for (const side of [-1, 1]) {
@@ -1163,12 +1160,7 @@ function applyPhenotype(mesh, baseColor, profile) {
   }
 
   const tail = new THREE.Mesh(
-    new THREE.CylinderGeometry(
-      0.028 + profile.tailLength * 0.018,
-      0.11 + profile.tailLength * 0.028,
-      profile.tailLength,
-      8
-    ),
+    new THREE.ConeGeometry(0.08 + profile.tailLength * 0.028, profile.tailLength, 8),
     accentMat
   );
   tail.position.set(0, 0, -profile.bodyScale.z * 0.95);
