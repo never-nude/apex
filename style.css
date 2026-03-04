@@ -1,8 +1,8 @@
 :root {
   color-scheme: only light;
-  --ink: #e9efe9;
-  --ink-soft: #b6c3b8;
-  --panel: rgba(10, 24, 18, 0.62);
+  --ink: #f5f9e6;
+  --ink-soft: #dce7c8;
+  --panel: rgba(29, 56, 27, 0.54);
 }
 
 * {
@@ -16,7 +16,7 @@ body {
   height: 100%;
   overflow: hidden;
   font-family: "Avenir Next", "Segoe UI", sans-serif;
-  background: radial-gradient(circle at 12% 18%, #244f41, #132b23 55%, #0d1f18);
+  background: radial-gradient(circle at 15% 12%, #fff1ad, #9fd789 38%, #5b9760 72%, #2f5f3a);
 }
 
 #viewport {
@@ -34,7 +34,7 @@ body {
   min-width: 280px;
   max-width: 520px;
   padding: 11px 12px;
-  border: 1px solid rgba(167, 197, 177, 0.34);
+  border: 1px solid rgba(225, 239, 182, 0.46);
   border-radius: 10px;
   background: var(--panel);
   color: var(--ink);
@@ -73,8 +73,8 @@ body {
   width: 220px;
   height: 220px;
   border-radius: 8px;
-  border: 1px solid rgba(167, 197, 177, 0.35);
-  background: rgba(10, 24, 18, 0.5);
+  border: 1px solid rgba(231, 242, 194, 0.55);
+  background: rgba(255, 247, 223, 0.66);
 }
 
 .line {

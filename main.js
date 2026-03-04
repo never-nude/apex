@@ -3,6 +3,7 @@
 const BALANCE = {
   gameplay: {
     predatorsEnabled: true,
+    simpleReproduction: true,
   },
   world: {
     baseRadius: 80,
@@ -263,7 +264,7 @@ function togglePredatorMode() {
 }
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(0x0f231b, 0.0058);
+scene.fog = new THREE.FogExp2(0xd5e8b6, 0.0036);
 
 const camera = new THREE.PerspectiveCamera(
   62,
@@ -276,6 +277,7 @@ const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = false;
+renderer.setClearColor(0xbfe2ff, 1);
 renderer.domElement.id = "viewport";
 document.body.appendChild(renderer.domElement);
 
@@ -285,22 +287,26 @@ const mapState = {
   range: 92,
 };
 
-const hemi = new THREE.HemisphereLight(0xd6f4e8, 0x214233, 1.15);
+const hemi = new THREE.HemisphereLight(0xfff7d8, 0xa6c278, 1.44);
 scene.add(hemi);
 
-const sun = new THREE.DirectionalLight(0xffffff, 0.86);
-sun.position.set(50, 90, 30);
+const sun = new THREE.DirectionalLight(0xfff3cc, 1.26);
+sun.position.set(56, 112, 44);
 scene.add(sun);
+
+const warmFill = new THREE.DirectionalLight(0xffe8ba, 0.4);
+warmFill.position.set(-52, 64, -26);
+scene.add(warmFill);
 
 const zoneVisuals = [];
 const BIOMES = {
-  meadow: { id: "meadow", color: 0x5d9668, unlockTier: 1 },
-  beach: { id: "beach", color: 0xc8b784, unlockTier: 1 },
-  rainforest: { id: "rainforest", color: 0x2f7a49, unlockTier: 1 },
-  highland: { id: "highland", color: 0x70806f, unlockTier: 2 },
-  volcanic: { id: "volcanic", color: 0x8b5c3a, unlockTier: 2 },
-  wetland: { id: "wetland", color: 0x2f6d77, unlockTier: 3 },
-  cloudforest: { id: "cloudforest", color: 0x57767a, unlockTier: 3 },
+  meadow: { id: "meadow", color: 0x82bc63, unlockTier: 1 },
+  beach: { id: "beach", color: 0xe7cf93, unlockTier: 1 },
+  rainforest: { id: "rainforest", color: 0x62ad57, unlockTier: 1 },
+  highland: { id: "highland", color: 0xb3c07a, unlockTier: 2 },
+  volcanic: { id: "volcanic", color: 0xcd864e, unlockTier: 2 },
+  wetland: { id: "wetland", color: 0x8fbe6b, unlockTier: 3 },
+  cloudforest: { id: "cloudforest", color: 0xb8cf8a, unlockTier: 3 },
 };
 const BIOME_INDEX = Object.fromEntries(Object.values(BIOMES).map((biome) => [biome.id, biome]));
 const VOLCANIC_CENTER = new THREE.Vector3(42, 0, 22);
@@ -453,35 +459,35 @@ function buildTerrainTexture(size) {
         Math.sin(wx * 0.07) * 0.5 +
         Math.cos(wz * 0.09) * 0.4 +
         Math.sin((wx + wz) * 0.035) * 0.35;
-      const shade = 0.84 + n * 0.12;
+      const shade = 0.92 + n * 0.11;
 
-      let r = 74;
-      let g = 112;
-      let b = 84;
+      let r = 134;
+      let g = 178;
+      let b = 102;
       if (region === BIOMES.beach.id) {
-        r = 191;
-        g = 172;
-        b = 127;
+        r = 214;
+        g = 189;
+        b = 132;
       } else if (region === BIOMES.rainforest.id) {
-        r = 49;
-        g = 112;
-        b = 67;
-      } else if (region === BIOMES.highland.id) {
-        r = 113;
-        g = 126;
-        b = 109;
-      } else if (region === BIOMES.volcanic.id) {
-        r = 136;
-        g = 92;
-        b = 61;
-      } else if (region === BIOMES.wetland.id) {
-        r = 63;
-        g = 118;
-        b = 124;
-      } else if (region === BIOMES.cloudforest.id) {
         r = 88;
-        g = 118;
-        b = 123;
+        g = 154;
+        b = 90;
+      } else if (region === BIOMES.highland.id) {
+        r = 170;
+        g = 178;
+        b = 112;
+      } else if (region === BIOMES.volcanic.id) {
+        r = 176;
+        g = 119;
+        b = 74;
+      } else if (region === BIOMES.wetland.id) {
+        r = 120;
+        g = 166;
+        b = 115;
+      } else if (region === BIOMES.cloudforest.id) {
+        r = 156;
+        g = 182;
+        b = 128;
       }
 
       data[i] = clamp(Math.floor(r * shade), 0, 255);
@@ -1722,24 +1728,24 @@ function nextId() {
 function floraBiomeProfile(position) {
   const biome = biomeAt(position);
   if (biome === BIOMES.beach.id) {
-    return { energyMin: 6, energyMax: 11, color: 0xa8bb7b, respawnMult: 1.16 };
+    return { energyMin: 6, energyMax: 11, color: 0xc7c176, respawnMult: 1.16 };
   }
   if (biome === BIOMES.rainforest.id) {
-    return { energyMin: 11, energyMax: 19, color: 0x4da05f, respawnMult: 0.9 };
+    return { energyMin: 11, energyMax: 19, color: 0x5faf5d, respawnMult: 0.9 };
   }
   if (biome === BIOMES.highland.id) {
-    return { energyMin: 8, energyMax: 14, color: 0x8ca77b, respawnMult: 1.1 };
+    return { energyMin: 8, energyMax: 14, color: 0xa9bb74, respawnMult: 1.1 };
   }
   if (biome === BIOMES.volcanic.id) {
-    return { energyMin: 12, energyMax: 22, color: 0xb37a4c, respawnMult: 1.18 };
+    return { energyMin: 12, energyMax: 22, color: 0xc8834f, respawnMult: 1.18 };
   }
   if (biome === BIOMES.wetland.id) {
-    return { energyMin: 9, energyMax: 16, color: 0x5e9f92, respawnMult: 0.94 };
+    return { energyMin: 9, energyMax: 16, color: 0x7bb06a, respawnMult: 0.94 };
   }
   if (biome === BIOMES.cloudforest.id) {
-    return { energyMin: 10, energyMax: 17, color: 0x75a7a9, respawnMult: 0.98 };
+    return { energyMin: 10, energyMax: 17, color: 0x97ba78, respawnMult: 0.98 };
   }
-  return { energyMin: 9, energyMax: 16, color: 0x63b16f, respawnMult: 1.0 };
+  return { energyMin: 9, energyMax: 16, color: 0x75bc67, respawnMult: 1.0 };
 }
 
 function applyFloraBiome(node) {
@@ -1864,46 +1870,51 @@ function spawnMateCluster() {
   clearGroup(populations.rivals);
   const tone = toneProfile();
   const reqScale = tone.mateRequirementScale;
+  const simpleMode = isSimpleReproductionMode();
 
   const root = player.pos.clone();
   const angle = rand(0, Math.PI * 2);
-  const dist = rand(8, 18);
+  const dist = simpleMode ? rand(2.8, 4.2) : rand(8, 18);
   root.x += Math.cos(angle) * dist;
   root.z += Math.sin(angle) * dist;
   limitToWorld(root);
-  const mateCount = 2;
+  const mateCount = simpleMode ? 1 : 2;
   for (let i = 0; i < mateCount; i += 1) {
     const id = nextId();
     const mesh = makeSphere(0x9cd8ff, 1.12, 14);
-    const p = root.clone().add(randVec(6));
+    const p = root.clone().add(randVec(simpleMode ? 1.6 : 6));
     placeAtSurface(p, 1.2);
     mesh.position.copy(p);
     scene.add(mesh);
 
     const mods = {
-      speed: rand(-0.07, 0.07),
-      stamina: rand(-0.07, 0.07),
-      herbivore: rand(-0.07, 0.07),
-      carnivore: rand(-0.07, 0.07),
-      swim: rand(-0.07, 0.07),
-      heat: rand(-0.07, 0.07),
-      social: rand(-0.07, 0.07),
+      speed: rand(simpleMode ? -0.03 : -0.07, simpleMode ? 0.08 : 0.07),
+      stamina: rand(simpleMode ? -0.03 : -0.07, simpleMode ? 0.08 : 0.07),
+      herbivore: rand(simpleMode ? -0.03 : -0.07, simpleMode ? 0.08 : 0.07),
+      carnivore: rand(simpleMode ? -0.03 : -0.07, simpleMode ? 0.08 : 0.07),
+      swim: rand(simpleMode ? -0.03 : -0.07, simpleMode ? 0.08 : 0.07),
+      heat: rand(simpleMode ? -0.03 : -0.07, simpleMode ? 0.08 : 0.07),
+      social: rand(simpleMode ? -0.03 : -0.07, simpleMode ? 0.08 : 0.07),
     };
 
     const traitKeys = Object.keys(mods);
     const bonus = traitKeys[(Math.random() * traitKeys.length) | 0];
-    const cost = traitKeys[(Math.random() * traitKeys.length) | 0];
-    mods[bonus] += rand(0.08, 0.14);
-    mods[cost] -= rand(0.03, 0.08);
+    mods[bonus] += rand(simpleMode ? 0.06 : 0.08, simpleMode ? 0.12 : 0.14);
+    if (!simpleMode) {
+      const cost = traitKeys[(Math.random() * traitKeys.length) | 0];
+      mods[cost] -= rand(0.03, 0.08);
+    }
 
-    const requirement = i === 0
-      ? {
-          type: "energy",
-          min: clamp(BALANCE.player.reproductionEnergyRatio * reqScale, 0.5, 0.92),
-        }
-      : Math.random() < 0.5
-        ? { type: "chase", min: Math.max(1, Math.round(2 * reqScale)) }
-        : { type: "forage", min: Math.max(2, Math.round(6 * reqScale)) };
+    const requirement = simpleMode
+      ? { type: "none", min: 0 }
+      : i === 0
+        ? {
+            type: "energy",
+            min: clamp(BALANCE.player.reproductionEnergyRatio * reqScale, 0.5, 0.92),
+          }
+        : Math.random() < 0.5
+          ? { type: "chase", min: Math.max(1, Math.round(2 * reqScale)) }
+          : { type: "forage", min: Math.max(2, Math.round(6 * reqScale)) };
 
     populations.mates.push({
       id,
@@ -1935,40 +1946,42 @@ function spawnMateCluster() {
     );
   }
 
-  for (let i = 0; i < populations.mates.length; i += 1) {
-    const id = nextId();
-    const mesh = makeSphere(0xf2b876, 1.0, 10);
-    const p = root.clone().add(randVec(14));
-    placeAtSurface(p, 1.0);
-    mesh.position.copy(p);
-    applyPhenotype(
-      mesh,
-      0xf2b876,
-      makePhenotypeProfile({
-        seed: id * 17 + i,
-        role: "rival",
-        traits: {
-          speed: rand(0.35, 0.85),
-          stamina: rand(0.25, 0.7),
-          herbivore: rand(0.2, 0.6),
-          carnivore: rand(0.2, 0.8),
-          swim: rand(0.0, 0.5),
-          heat: rand(0.2, 0.8),
-          social: rand(0.3, 0.75),
-        },
-      })
-    );
-    scene.add(mesh);
-    populations.rivals.push({
-      id,
-      slot: i + 1,
-      mesh,
-      targetIndex: i,
-      claimTimer: 0,
-      speed: rand(4.2, 6.1) * tone.rivalSpeedMult,
-      heightOffset: 1.0,
-      marker: createRivalMarker(mesh, `R${i + 1}`),
-    });
+  if (!simpleMode) {
+    for (let i = 0; i < populations.mates.length; i += 1) {
+      const id = nextId();
+      const mesh = makeSphere(0xf2b876, 1.0, 10);
+      const p = root.clone().add(randVec(14));
+      placeAtSurface(p, 1.0);
+      mesh.position.copy(p);
+      applyPhenotype(
+        mesh,
+        0xf2b876,
+        makePhenotypeProfile({
+          seed: id * 17 + i,
+          role: "rival",
+          traits: {
+            speed: rand(0.35, 0.85),
+            stamina: rand(0.25, 0.7),
+            herbivore: rand(0.2, 0.6),
+            carnivore: rand(0.2, 0.8),
+            swim: rand(0.0, 0.5),
+            heat: rand(0.2, 0.8),
+            social: rand(0.3, 0.75),
+          },
+        })
+      );
+      scene.add(mesh);
+      populations.rivals.push({
+        id,
+        slot: i + 1,
+        mesh,
+        targetIndex: i,
+        claimTimer: 0,
+        speed: rand(4.2, 6.1) * tone.rivalSpeedMult,
+        heightOffset: 1.0,
+        marker: createRivalMarker(mesh, `R${i + 1}`),
+      });
+    }
   }
 
   ensureSelectedMate();
@@ -2017,6 +2030,10 @@ function canReproduce() {
   return req.readyAge && req.readyEnergy && req.readyHealth && req.readyCooldown;
 }
 
+function isSimpleReproductionMode() {
+  return !!BALANCE.gameplay.simpleReproduction;
+}
+
 function reproductionThresholds() {
   const tone = toneProfile();
   const ageMin = BALANCE.player.reproductionAgeMin * tone.reproductionAgeMult;
@@ -2051,6 +2068,7 @@ function requirementMet(req) {
 
 function requirementText(req) {
   if (!req) return "unknown";
+  if (req.type === "none") return "none";
   if (req.type === "energy") return `energy >= ${Math.round(req.min * 100)}%`;
   if (req.type === "chase") return `chase successes >= ${req.min}`;
   if (req.type === "forage") return `plants eaten >= ${req.min}`;
@@ -2058,6 +2076,7 @@ function requirementText(req) {
 }
 
 function reproductionActionState() {
+  const simpleMode = isSimpleReproductionMode();
   const req = reproductionThresholds();
   const missing = [];
   if (!req.readyAge) missing.push(`age ${player.age.toFixed(0)}/${req.ageMin.toFixed(0)}`);
@@ -2073,16 +2092,16 @@ function reproductionActionState() {
 
   if (populations.mates.length === 0) {
     return {
-      step: "1/3",
-      text: "Press E once to signal mates.",
+      step: simpleMode ? "1/2" : "1/3",
+      text: simpleMode ? "Press E once to call a mate." : "Press E once to signal mates.",
     };
   }
 
   const selectedMate = ensureSelectedMate();
   if (!selectedMate) {
     return {
-      step: "1/3",
-      text: "No mate selected. Use 1/2 or Q/R.",
+      step: simpleMode ? "1/2" : "1/3",
+      text: simpleMode ? "No mate available. Press E again to call one nearby." : "No mate selected. Use 1/2 or Q/R.",
     };
   }
 
@@ -2090,26 +2109,33 @@ function reproductionActionState() {
   const eligible = requirementMet(selectedMate.requirement);
   if (!eligible) {
     return {
-      step: "2/3",
-      text: `M${selectedMate.slot} locked (${requirementText(selectedMate.requirement)}). Choose another mate or satisfy requirement.`,
+      step: simpleMode ? "2/2" : "2/3",
+      text: simpleMode
+        ? `Mate locked (${requirementText(selectedMate.requirement)}). Press E to call another.`
+        : `M${selectedMate.slot} locked (${requirementText(selectedMate.requirement)}). Choose another mate or satisfy requirement.`,
     };
   }
 
   if (dist > BALANCE.player.reproductionInteractDistance) {
     return {
-      step: "2/3",
-      text: `M${selectedMate.slot} eligible. Move closer (${dist.toFixed(1)}m / ${BALANCE.player.reproductionInteractDistance.toFixed(1)}m).`,
+      step: simpleMode ? "2/2" : "2/3",
+      text: simpleMode
+        ? `Mate nearby. Move closer (${dist.toFixed(1)}m / ${BALANCE.player.reproductionInteractDistance.toFixed(1)}m).`
+        : `M${selectedMate.slot} eligible. Move closer (${dist.toFixed(1)}m / ${BALANCE.player.reproductionInteractDistance.toFixed(1)}m).`,
     };
   }
 
   return {
-    step: "3/3",
-    text: `M${selectedMate.slot} in range. Press E now to reproduce.`,
+    step: simpleMode ? "2/2" : "3/3",
+    text: simpleMode
+      ? "Mate in range. Press E now to start the next generation."
+      : `M${selectedMate.slot} in range. Press E now to reproduce.`,
   };
 }
 
 function requirementShort(req) {
   if (!req) return "req?";
+  if (req.type === "none") return "free";
   if (req.type === "energy") return `E>=${Math.round(req.min * 100)}%`;
   if (req.type === "chase") return `C>=${req.min}`;
   if (req.type === "forage") return `F>=${req.min}`;
@@ -2854,6 +2880,7 @@ function nextGeneration(mate) {
 }
 
 function tryReproduce() {
+  const simpleMode = isSimpleReproductionMode();
   const req = reproductionThresholds();
   if (!(req.readyAge && req.readyEnergy && req.readyHealth && req.readyCooldown)) {
     setActionMessage("Not ready yet. Follow the Repro action line.", 2.3);
@@ -2862,13 +2889,21 @@ function tryReproduce() {
 
   if (populations.mates.length === 0) {
     spawnMateCluster();
-    setActionMessage("Mates signaled nearby. Select one (1/2 or Q/R), move close, then press E.", 3.2);
+    setActionMessage(
+      simpleMode
+        ? "Mate called nearby. Move close to M1, then press E again."
+        : "Mates signaled nearby. Select one (1/2 or Q/R), move close, then press E.",
+      3.2
+    );
     return;
   }
 
   const selectedMate = ensureSelectedMate();
   if (!selectedMate) {
-    setActionMessage("No mate selected. Use 1/2 or Q/R.", 2.0);
+    setActionMessage(
+      simpleMode ? "No mate found. Press E to call one again." : "No mate selected. Use 1/2 or Q/R.",
+      2.0
+    );
     return;
   }
 
@@ -2876,7 +2911,9 @@ function tryReproduce() {
   const selectedEligible = requirementMet(selectedMate.requirement);
   if (!selectedEligible) {
     setActionMessage(
-      `M${selectedMate.slot} is locked (${requirementText(selectedMate.requirement)}).`,
+      simpleMode
+        ? `Mate is locked (${requirementText(selectedMate.requirement)}). Press E to call another.`
+        : `M${selectedMate.slot} is locked (${requirementText(selectedMate.requirement)}).`,
       2.6
     );
     return;
@@ -2884,9 +2921,11 @@ function tryReproduce() {
 
   if (selectedDist > BALANCE.player.reproductionInteractDistance) {
     setActionMessage(
-      `Move closer to M${selectedMate.slot}: ${selectedDist.toFixed(1)}m / ${BALANCE.player.reproductionInteractDistance.toFixed(
-        1
-      )}m`,
+      simpleMode
+        ? `Move closer to mate: ${selectedDist.toFixed(1)}m / ${BALANCE.player.reproductionInteractDistance.toFixed(1)}m`
+        : `Move closer to M${selectedMate.slot}: ${selectedDist.toFixed(1)}m / ${BALANCE.player.reproductionInteractDistance.toFixed(
+            1
+          )}m`,
       2.4
     );
     return;
@@ -2954,10 +2993,13 @@ function hudText() {
   }
 
   if (ui.mateInfo) {
+    const simpleMode = isSimpleReproductionMode();
     let mateInfoLine = "Mate cards: unavailable (become reproduction-ready first).";
     if (canReproduce()) {
       if (populations.mates.length === 0) {
-        mateInfoLine = "Mate cards: waiting for signal. Press E to spawn mates.";
+        mateInfoLine = simpleMode
+          ? "Mate card: none active. Press E to call a nearby mate."
+          : "Mate cards: waiting for signal. Press E to spawn mates.";
       } else {
         ensureSelectedMate();
         const cards = populations.mates
@@ -2969,7 +3011,9 @@ function hudText() {
             return `${selected}M${mate.slot} ${mateModSummary(mate)} ${requirementShort(mate.requirement)} ${reqState}`;
           })
           .join(" | ");
-        mateInfoLine = `Mate cards: ${cards} | Select 1/2 or Q/R`;
+        mateInfoLine = simpleMode
+          ? `Mate card: ${cards} | Auto-select active`
+          : `Mate cards: ${cards} | Select 1/2 or Q/R`;
       }
     }
     ui.mateInfo.textContent = mateInfoLine;
@@ -3013,8 +3057,16 @@ function hudText() {
   }
 
   if (ui.hint) {
+    const simpleMode = isSimpleReproductionMode();
+    const reproHint = simpleMode
+      ? "Reproduce: E (ready -> E to call mate -> move close -> E again)"
+      : "Reproduce: E (follow Repro action line)";
+    const mateHint = simpleMode ? "" : " | Mate select: 1/2 or Q/R";
+    const markerHint = simpleMode
+      ? " | Mate marker: M1 mint glow"
+      : " | Mate markers: M1/M2 mint-gold | Rival markers: R1/R2 orange";
     ui.hint.textContent =
-      "Move: WASD + Arrow steer (Up/Down throttle, Left/Right turn) | Focus: F | Map: G | Reproduce: E (follow Repro action line) | Mate select: 1/2 or Q/R | Tone: M | Predators: P | Telemetry: T | Save: K | Load: L | New: N | Debug: Tab | Pan: Shift+Drag | Mate markers: M1/M2 cyan-green | Rival markers: R1/R2 orange";
+      `Move: WASD + Arrow steer (Up/Down throttle, Left/Right turn) | Focus: F | Map: G | ${reproHint}${mateHint} | Tone: M | Predators: P | Telemetry: T | Save: K | Load: L | New: N | Debug: Tab | Pan: Shift+Drag${markerHint}`;
   }
 }
 
@@ -3261,10 +3313,12 @@ window.addEventListener("keydown", (e) => {
     mapState.enabled = !mapState.enabled;
     setActionMessage(`Map ${mapState.enabled ? "shown" : "hidden"}.`, 1.6);
   }
-  if (e.code === "Digit1") selectMateBySlot(1, false);
-  if (e.code === "Digit2") selectMateBySlot(2, false);
-  if (e.code === "KeyQ") cycleMateSelection(-1);
-  if (e.code === "KeyR") cycleMateSelection(1);
+  if (!isSimpleReproductionMode()) {
+    if (e.code === "Digit1") selectMateBySlot(1, false);
+    if (e.code === "Digit2") selectMateBySlot(2, false);
+    if (e.code === "KeyQ") cycleMateSelection(-1);
+    if (e.code === "KeyR") cycleMateSelection(1);
+  }
   if (e.code === "KeyM") cycleToneProfile();
   if (e.code === "KeyP") togglePredatorMode();
   if (e.code === "KeyT") {
@@ -3328,7 +3382,7 @@ function drawMinimap() {
   const toMapY = (z) => cy - (z - player.pos.z) * scale;
 
   ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = "rgba(8, 20, 16, 0.9)";
+  ctx.fillStyle = "rgba(255, 244, 214, 0.9)";
   ctx.fillRect(0, 0, w, h);
 
   ctx.save();
@@ -3336,24 +3390,24 @@ function drawMinimap() {
   ctx.arc(cx, cy, radius, 0, Math.PI * 2);
   ctx.clip();
 
-  ctx.fillStyle = "rgba(23, 44, 35, 0.9)";
+  ctx.fillStyle = "rgba(165, 201, 133, 0.92)";
   ctx.fillRect(0, 0, w, h);
 
   if (WORLD.tier >= BIOMES.volcanic.unlockTier) {
-    ctx.fillStyle = "rgba(160, 96, 66, 0.42)";
+    ctx.fillStyle = "rgba(190, 117, 75, 0.44)";
     ctx.beginPath();
     ctx.arc(toMapX(VOLCANIC_CENTER.x), toMapY(VOLCANIC_CENTER.z), VOLCANIC_RADIUS * scale, 0, Math.PI * 2);
     ctx.fill();
   }
 
   if (WORLD.tier >= BIOMES.wetland.unlockTier) {
-    ctx.fillStyle = "rgba(76, 132, 143, 0.4)";
+    ctx.fillStyle = "rgba(121, 173, 112, 0.44)";
     ctx.beginPath();
     ctx.arc(toMapX(LAGOON_CENTER.x), toMapY(LAGOON_CENTER.z), LAGOON_RADIUS * scale, 0, Math.PI * 2);
     ctx.fill();
   }
 
-  ctx.strokeStyle = "rgba(232, 243, 235, 0.34)";
+  ctx.strokeStyle = "rgba(245, 252, 228, 0.56)";
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.arc(toMapX(0), toMapY(0), WORLD.radius * scale, 0, Math.PI * 2);
@@ -3374,16 +3428,16 @@ function drawMinimap() {
   for (let i = 0; i < populations.flora.length; i += 3) {
     const f = populations.flora[i];
     if (!f || !f.alive) continue;
-    drawEntity(f.mesh.position.x, f.mesh.position.z, 1.4, "#2d7f46", 0.78);
+    drawEntity(f.mesh.position.x, f.mesh.position.z, 1.4, "#4ca145", 0.78);
   }
 
   for (const prey of populations.prey) {
     if (!prey.alive) continue;
-    drawEntity(prey.mesh.position.x, prey.mesh.position.z, 1.8, "#8ed472", 0.92);
+    drawEntity(prey.mesh.position.x, prey.mesh.position.z, 1.8, "#b7d86d", 0.92);
   }
 
   for (const pred of populations.predators) {
-    drawEntity(pred.mesh.position.x, pred.mesh.position.z, 2.15, "#dc725f", 0.94);
+    drawEntity(pred.mesh.position.x, pred.mesh.position.z, 2.15, "#ce6b54", 0.94);
   }
 
   const mateState = nearestMateState();
@@ -3394,14 +3448,14 @@ function drawMinimap() {
     const isNearestEligible = mateState.nearestEligible && mateState.nearestEligible.id === mate.id;
     const isSelected = selectedMate && selectedMate.id === mate.id;
     const color = isNearestEligible
-      ? "#beff80"
+      ? "#f2ef90"
       : isSelected
         ? eligible
-          ? "#d8f4ff"
-          : "#a8b3bf"
+          ? "#ffe7ac"
+          : "#dbc9a8"
         : eligible
-          ? "#87d8ff"
-          : "#6f7f8d";
+          ? "#adeabd"
+          : "#949f80";
     drawEntity(
       mate.mesh.position.x,
       mate.mesh.position.z,
@@ -3412,19 +3466,19 @@ function drawMinimap() {
   }
 
   for (const rival of populations.rivals) {
-    drawEntity(rival.mesh.position.x, rival.mesh.position.z, 2.3, "#ffb56e", 0.95);
+    drawEntity(rival.mesh.position.x, rival.mesh.position.z, 2.3, "#d88950", 0.95);
   }
 
   ctx.restore();
 
-  ctx.strokeStyle = "rgba(222, 236, 227, 0.7)";
+  ctx.strokeStyle = "rgba(248, 252, 236, 0.86)";
   ctx.lineWidth = 1.2;
   ctx.beginPath();
   ctx.arc(cx, cy, radius, 0, Math.PI * 2);
   ctx.stroke();
 
   // Player always centered in this radar map.
-  ctx.fillStyle = "#f8fff8";
+  ctx.fillStyle = "#fffde6";
   ctx.beginPath();
   ctx.arc(cx, cy, 3.2, 0, Math.PI * 2);
   ctx.fill();
@@ -3436,7 +3490,7 @@ function drawMinimap() {
   const uz = hz / mag;
   const tipX = cx + ux * 9;
   const tipY = cy - uz * 9;
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+  ctx.strokeStyle = "rgba(255, 253, 224, 0.95)";
   ctx.lineWidth = 1.4;
   ctx.beginPath();
   ctx.moveTo(cx, cy);
@@ -3444,7 +3498,9 @@ function drawMinimap() {
   ctx.stroke();
 
   if (ui.mapLegend) {
-    ui.mapLegend.textContent = `Map: G | Radius ${range.toFixed(0)}m | White=You | Bright=selected mate | Green/Cyan=Mates | Orange=Rivals`;
+    const mateLegend = isSimpleReproductionMode() ? "Mint=Mate" : "Mint/Gold=Mates";
+    const rivalLegend = isSimpleReproductionMode() ? "" : " | Orange=Rivals";
+    ui.mapLegend.textContent = `Map: G | Radius ${range.toFixed(0)}m | Ivory=You | Gold=selected mate | ${mateLegend}${rivalLegend}`;
   }
 }
 
