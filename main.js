@@ -1,0 +1,2821 @@
+"use strict";
+
+const BALANCE = {
+  world: {
+    baseRadius: 80,
+    radiusPerTier: 28,
+    hazardScalePerTier: 0.17,
+    generationsPerTier: 2,
+    maxTier: 6,
+  },
+  populations: {
+    floraBase: 24,
+    floraPerTier: 12,
+    preyBase: 12,
+    preyPerTier: 7,
+    predatorBase: 5,
+    predatorPerTier: 3,
+  },
+  player: {
+    maxEnergyBase: 70,
+    maxEnergyFromStamina: 70,
+    moveSpeedBase: 4.2,
+    moveSpeedFromTrait: 9.2,
+    reproductionAgeMin: 52,
+    reproductionEnergyRatio: 0.72,
+    reproductionHealthMin: 35,
+    reproductionInteractDistance: 3.4,
+    reproductionCooldownAfterFail: 18,
+    reproductionCooldownAfterBirth: 12,
+    offspringStartEnergyRatio: 0.64,
+    deathResetEnergyRatio: 0.55,
+    energyDrainBase: 0.58,
+    energyDrainMoveScale: 0.75,
+    scorchDrainScale: 0.95,
+    wetlandDrainScale: 0.74,
+    lowEnergyRatio: 0.22,
+    lowEnergyDamageBase: 0.65,
+    lowEnergyDamageHazardScale: 0.28,
+    passiveHealthRegen: 0.55,
+    predatorContactDamage: 18,
+    predatorKnockback: 4.8,
+  },
+  feeding: {
+    floraGainBase: 0.42,
+    preyGainBase: 0.5,
+    floraRespawnMin: 12,
+    floraRespawnMax: 20,
+    floraTierRespawnScale: 0.05,
+    preyRespawnMin: 9,
+    preyRespawnMax: 16,
+    preyTierRespawnScale: 0.04,
+    preyEnergyMin: 10,
+    preyEnergyMax: 16,
+    chaseSuccessWindow: 8,
+  },
+  resources: {
+    meadowShare: 0.58,
+    scorchShare: 0.2,
+    wetlandShare: 0.22,
+    meadowEnergyMin: 9,
+    meadowEnergyMax: 16,
+    scorchEnergyMin: 11,
+    scorchEnergyMax: 21,
+    wetlandEnergyMin: 8,
+    wetlandEnergyMax: 15,
+    scorchRespawnScale: 1.18,
+    wetlandRespawnScale: 0.9,
+  },
+  evolution: {
+    mutationMin: -0.045,
+    mutationMax: 0.045,
+    parentWeight: 0.64,
+    targetWeight: 0.28,
+    dietCap: 1.3,
+  },
+  social: {
+    preyFlockRadius: 11,
+    preySeparationRadius: 2.2,
+    preyAlignmentWeight: 0.78,
+    preyCohesionWeight: 0.54,
+    preySeparationWeight: 1.2,
+    predatorPackRadius: 16,
+    predatorSeparationRadius: 2.9,
+    predatorAlignmentWeight: 0.48,
+    predatorCohesionWeight: 0.38,
+    predatorSeparationWeight: 0.88,
+    predatorPackChaseBoost: 0.35,
+  },
+  phenotype: {
+    liveBlendRate: 1.8,
+    refreshMinSeconds: 2.4,
+    refreshThreshold: 0.028,
+    maxDietSum: 1.35,
+  },
+  save: {
+    key: "apex_sim_save_v1",
+    schema: 1,
+    autosaveSeconds: 10,
+    maxLineageEntries: 120,
+  },
+};
+
+const DEFAULT_TRAITS = Object.freeze({
+  speed: 0.34,
+  stamina: 0.28,
+  herbivore: 0.63,
+  carnivore: 0.22,
+  swim: 0.18,
+  heat: 0.2,
+  social: 0.2,
+});
+const TRAIT_KEYS = Object.keys(DEFAULT_TRAITS);
+
+const TONE_PROFILES = Object.freeze([
+  {
+    id: "scientific",
+    label: "Scientific",
+    energyDrainMult: 1.14,
+    damageMult: 1.18,
+    regenMult: 0.78,
+    mutationScale: 0.58,
+    targetWeightScale: 0.86,
+    reproductionAgeMult: 1.12,
+    reproductionEnergyMult: 1.08,
+    reproductionHealthAdd: 5,
+    mateRequirementScale: 1.2,
+    rivalSpeedMult: 1.14,
+    rivalClaimScale: 0.82,
+    socialExposureMult: 0.84,
+    cuteVisual: 0.15,
+    cuteMotion: 0.2,
+  },
+  {
+    id: "balanced",
+    label: "Balanced",
+    energyDrainMult: 1.0,
+    damageMult: 1.0,
+    regenMult: 1.0,
+    mutationScale: 1.0,
+    targetWeightScale: 1.0,
+    reproductionAgeMult: 1.0,
+    reproductionEnergyMult: 1.0,
+    reproductionHealthAdd: 0,
+    mateRequirementScale: 1.0,
+    rivalSpeedMult: 1.0,
+    rivalClaimScale: 1.0,
+    socialExposureMult: 1.0,
+    cuteVisual: 0.4,
+    cuteMotion: 0.46,
+  },
+  {
+    id: "stylized",
+    label: "Stylized",
+    energyDrainMult: 0.92,
+    damageMult: 0.9,
+    regenMult: 1.12,
+    mutationScale: 1.08,
+    targetWeightScale: 1.06,
+    reproductionAgeMult: 0.9,
+    reproductionEnergyMult: 0.92,
+    reproductionHealthAdd: -4,
+    mateRequirementScale: 0.86,
+    rivalSpeedMult: 0.9,
+    rivalClaimScale: 1.18,
+    socialExposureMult: 1.1,
+    cuteVisual: 0.68,
+    cuteMotion: 0.72,
+  },
+]);
+
+const toneState = {
+  index: 1,
+};
+
+const WORLD = {
+  baseRadius: BALANCE.world.baseRadius,
+  tier: 1,
+  radius: BALANCE.world.baseRadius,
+  hazardScale: 1.0,
+};
+
+const KEY = Object.create(null);
+const ACTIVE_CHASE = new Map();
+const ACTIVE_THREATS = new Map();
+
+const ui = {
+  lineage: document.getElementById("lineage"),
+  status: document.getElementById("status"),
+  repro: document.getElementById("repro"),
+  target: document.getElementById("target"),
+  traits: document.getElementById("traits"),
+  save: document.getElementById("save"),
+  telemetry: document.getElementById("telemetry"),
+  mapPanel: document.getElementById("mapPanel"),
+  minimap: document.getElementById("minimap"),
+  mapLegend: document.getElementById("mapLegend"),
+  hint: document.getElementById("hint"),
+  debug: document.getElementById("debug"),
+};
+
+const saveState = {
+  loadedFromDisk: false,
+  lastReason: "none",
+  lastSavedAt: 0,
+  error: "",
+};
+
+let actionMessage = "";
+let actionMessageTimer = 0;
+const telemetry = {
+  enabled: true,
+  fps: 0,
+  sampleFrames: 0,
+  sampleTime: 0,
+  births: 0,
+  deaths: 0,
+};
+
+function toneProfile() {
+  return TONE_PROFILES[toneState.index];
+}
+
+function setToneIndex(nextIndex) {
+  const max = TONE_PROFILES.length - 1;
+  toneState.index = clamp(Math.floor(nextIndex) || 0, 0, max);
+}
+
+function cycleToneProfile() {
+  setToneIndex((toneState.index + 1) % TONE_PROFILES.length);
+  refreshPlayerPhenotype(true);
+  setActionMessage(`Tone mode: ${toneProfile().label}`, 2.4);
+  saveSnapshot("tone-change");
+}
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x0f231b, 0.0058);
+
+const camera = new THREE.PerspectiveCamera(
+  62,
+  window.innerWidth / window.innerHeight,
+  0.1,
+  900
+);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = false;
+renderer.domElement.id = "viewport";
+document.body.appendChild(renderer.domElement);
+
+const minimapCtx = ui.minimap ? ui.minimap.getContext("2d") : null;
+const mapState = {
+  enabled: true,
+  range: 92,
+};
+
+const hemi = new THREE.HemisphereLight(0xd6f4e8, 0x214233, 1.15);
+scene.add(hemi);
+
+const sun = new THREE.DirectionalLight(0xffffff, 0.86);
+sun.position.set(50, 90, 30);
+scene.add(sun);
+
+const zoneVisuals = [];
+const BIOMES = {
+  meadow: { id: "meadow", color: 0x4f8f62 },
+  scorch: { id: "scorch", color: 0x916036 },
+  wetland: { id: "wetland", color: 0x2f6d77 },
+};
+const SCORCH_CENTER = new THREE.Vector3(54, 0, 8);
+const SCORCH_RADIUS = 42;
+const WETLAND_CENTER = new THREE.Vector3(-22, 0, -56);
+const WETLAND_RADIUS = 38;
+const worldDecor = [];
+const TERRAIN = {
+  size: 720,
+  segments: 180,
+  elevationScale: 6.4,
+};
+
+function biomeRegionAtXZ(x, z) {
+  const scorchDx = x - SCORCH_CENTER.x;
+  const scorchDz = z - SCORCH_CENTER.z;
+  if (scorchDx * scorchDx + scorchDz * scorchDz < SCORCH_RADIUS * SCORCH_RADIUS) {
+    return BIOMES.scorch.id;
+  }
+
+  const wetDx = x - WETLAND_CENTER.x;
+  const wetDz = z - WETLAND_CENTER.z;
+  if (wetDx * wetDx + wetDz * wetDz < WETLAND_RADIUS * WETLAND_RADIUS) {
+    return BIOMES.wetland.id;
+  }
+
+  return BIOMES.meadow.id;
+}
+
+function terrainHeightAt(x, z) {
+  const r = Math.sqrt(x * x + z * z);
+  const radial = Math.max(0, 1 - r / (WORLD.radius * 1.05));
+  let h =
+    Math.sin(x * 0.045) * 0.9 +
+    Math.cos(z * 0.038) * 0.85 +
+    Math.sin((x + z) * 0.022) * 0.7;
+  h *= TERRAIN.elevationScale * 0.22;
+  h += radial * 0.8;
+
+  const region = biomeRegionAtXZ(x, z);
+  if (region === BIOMES.scorch.id) {
+    h += Math.sin(x * 0.07 + z * 0.03) * 0.45 + 0.55;
+  } else if (region === BIOMES.wetland.id) {
+    h -= Math.cos(x * 0.05 - z * 0.06) * 0.35 + 0.45;
+  }
+  return h - 0.85;
+}
+
+function buildTerrainTexture(size) {
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const image = ctx.createImageData(size, size);
+  const data = image.data;
+
+  const half = TERRAIN.size * 0.5;
+  for (let py = 0; py < size; py += 1) {
+    for (let px = 0; px < size; px += 1) {
+      const i = (py * size + px) * 4;
+      const wx = (px / (size - 1)) * TERRAIN.size - half;
+      const wz = (py / (size - 1)) * TERRAIN.size - half;
+      const region = biomeRegionAtXZ(wx, wz);
+      const n =
+        Math.sin(wx * 0.07) * 0.5 +
+        Math.cos(wz * 0.09) * 0.4 +
+        Math.sin((wx + wz) * 0.035) * 0.35;
+      const shade = 0.84 + n * 0.12;
+
+      let r = 74;
+      let g = 112;
+      let b = 84;
+      if (region === BIOMES.scorch.id) {
+        r = 144;
+        g = 106;
+        b = 62;
+      } else if (region === BIOMES.wetland.id) {
+        r = 63;
+        g = 118;
+        b = 124;
+      }
+
+      data[i] = clamp(Math.floor(r * shade), 0, 255);
+      data[i + 1] = clamp(Math.floor(g * shade), 0, 255);
+      data[i + 2] = clamp(Math.floor(b * shade), 0, 255);
+      data[i + 3] = 255;
+    }
+  }
+
+  ctx.putImageData(image, 0, 0);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(1, 1);
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function buildGroundMesh() {
+  const geometry = new THREE.PlaneGeometry(
+    TERRAIN.size,
+    TERRAIN.size,
+    TERRAIN.segments,
+    TERRAIN.segments
+  );
+  geometry.rotateX(-Math.PI / 2);
+
+  const pos = geometry.attributes.position;
+  for (let i = 0; i < pos.count; i += 1) {
+    const x = pos.getX(i);
+    const z = pos.getZ(i);
+    pos.setY(i, terrainHeightAt(x, z));
+  }
+  pos.needsUpdate = true;
+  geometry.computeVertexNormals();
+
+  const material = new THREE.MeshStandardMaterial({
+    map: buildTerrainTexture(512),
+    roughness: 0.98,
+    metalness: 0.02,
+  });
+
+  return new THREE.Mesh(geometry, material);
+}
+
+const ground = buildGroundMesh();
+scene.add(ground);
+
+function placeAtSurface(v, offset) {
+  v.y = terrainHeightAt(v.x, v.z) + offset;
+}
+
+function rebuildBiomeVisuals() {
+  while (zoneVisuals.length > 0) {
+    const mesh = zoneVisuals.pop();
+    scene.remove(mesh);
+    mesh.geometry.dispose();
+    mesh.material.dispose();
+  }
+
+  const scorch = new THREE.Mesh(
+    new THREE.CircleGeometry(SCORCH_RADIUS, 36),
+    new THREE.MeshBasicMaterial({ color: BIOMES.scorch.color, transparent: true, opacity: 0.32 })
+  );
+  scorch.rotation.x = -Math.PI / 2;
+  scorch.position.set(
+    SCORCH_CENTER.x,
+    terrainHeightAt(SCORCH_CENTER.x, SCORCH_CENTER.z) + 0.12,
+    SCORCH_CENTER.z
+  );
+  scorch.visible = WORLD.tier >= 2;
+  scene.add(scorch);
+  zoneVisuals.push(scorch);
+
+  const wetland = new THREE.Mesh(
+    new THREE.CircleGeometry(WETLAND_RADIUS, 36),
+    new THREE.MeshBasicMaterial({ color: BIOMES.wetland.color, transparent: true, opacity: 0.32 })
+  );
+  wetland.rotation.x = -Math.PI / 2;
+  wetland.position.set(
+    WETLAND_CENTER.x,
+    terrainHeightAt(WETLAND_CENTER.x, WETLAND_CENTER.z) + 0.12,
+    WETLAND_CENTER.z
+  );
+  wetland.visible = WORLD.tier >= 3;
+  scene.add(wetland);
+  zoneVisuals.push(wetland);
+}
+
+function biomeAt(v) {
+  const region = biomeRegionAtXZ(v.x, v.z);
+  if (region === BIOMES.scorch.id && WORLD.tier >= 2) return BIOMES.scorch.id;
+  if (region === BIOMES.wetland.id && WORLD.tier >= 3) return BIOMES.wetland.id;
+  return BIOMES.meadow.id;
+}
+
+function clamp(v, min, max) {
+  return Math.max(min, Math.min(max, v));
+}
+
+function rand(min, max) {
+  return min + Math.random() * (max - min);
+}
+
+function randVec(radius) {
+  const a = rand(0, Math.PI * 2);
+  const r = Math.sqrt(Math.random()) * radius;
+  return new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r);
+}
+
+function unitXZ(v) {
+  const out = new THREE.Vector3(v.x, 0, v.z);
+  const n = out.length();
+  if (n < 0.0001) return out.set(0, 0, 1);
+  return out.multiplyScalar(1 / n);
+}
+
+function limitToWorld(v) {
+  const d = Math.sqrt(v.x * v.x + v.z * v.z);
+  const maxR = WORLD.radius - 2;
+  if (d > maxR) {
+    v.x = (v.x / d) * maxR;
+    v.z = (v.z / d) * maxR;
+  }
+}
+
+function makeSphere(color, r, seg) {
+  return new THREE.Mesh(
+    new THREE.SphereGeometry(r, seg || 10, seg || 10),
+    new THREE.MeshStandardMaterial({ color, roughness: 0.76, metalness: 0.06 })
+  );
+}
+
+function disposeMaterial(material) {
+  if (!material) return;
+  if (Array.isArray(material)) {
+    for (const entry of material) {
+      if (entry && typeof entry.dispose === "function") entry.dispose();
+    }
+    return;
+  }
+  if (typeof material.dispose === "function") material.dispose();
+}
+
+function disposeMeshTree(root) {
+  root.traverse((node) => {
+    if (!node.isMesh) return;
+    if (node.geometry && typeof node.geometry.dispose === "function") {
+      node.geometry.dispose();
+    }
+    disposeMaterial(node.material);
+  });
+}
+
+function seeded(seed) {
+  let s = (seed >>> 0) || 1;
+  return () => {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
+
+function jitter(base, spread, next) {
+  return base + (next() * 2 - 1) * spread;
+}
+
+function removePhenotype(mesh) {
+  const current = mesh.userData.phenotypeRig;
+  if (!current) return;
+  mesh.remove(current.group);
+  disposeMeshTree(current.group);
+  delete mesh.userData.phenotypeRig;
+}
+
+function setPhenotypeTint(mesh, hex) {
+  const rig = mesh.userData.phenotypeRig;
+  if (!rig) return;
+  for (const mat of rig.tintMaterials) {
+    mat.color.setHex(hex);
+  }
+}
+
+function makePhenotypeProfile(opts) {
+  const next = seeded(opts.seed || 1);
+  const t = opts.traits || DEFAULT_TRAITS;
+  const role = opts.role || "neutral";
+  const tone = toneProfile();
+  const cute = tone.cuteVisual;
+
+  const bodyScale = new THREE.Vector3(
+    clamp(jitter(1 + t.speed * 0.55 + t.carnivore * 0.35, 0.18, next), 0.7, 1.9),
+    clamp(jitter(0.85 + t.stamina * 0.7, 0.14, next), 0.65, 1.7),
+    clamp(jitter(0.9 + t.herbivore * 0.4 + t.swim * 0.35, 0.14, next), 0.65, 1.8)
+  );
+  const avgScale = (bodyScale.x + bodyScale.y + bodyScale.z) / 3;
+  bodyScale.lerp(
+    new THREE.Vector3(avgScale * 1.03, avgScale * 0.96, avgScale * 1.02),
+    cute * 0.28
+  );
+
+  let appendageType = "spike";
+  if (t.swim > 0.56) appendageType = "fin";
+  if (t.herbivore > t.carnivore + 0.2) appendageType = "leg";
+  if (role === "predator") appendageType = "spike";
+  if (role === "prey" && t.swim < 0.55) appendageType = "leg";
+  if (cute > 0.93 && appendageType === "spike" && role !== "predator") appendageType = "leg";
+
+  const baseAppendageCount = clamp(
+    Math.round(2 + t.speed * 2 + t.carnivore * 3 + t.social * 2 + next() * 3),
+    2,
+    9
+  );
+  const appendageCount = clamp(
+    Math.round(baseAppendageCount * (1 - cute * 0.1) + cute * 0.8),
+    2,
+    9
+  );
+
+  const dorsalCount = clamp(
+    Math.round((t.carnivore * 3 + t.heat * 2 + next() * 2) * (1 - cute * 0.15)),
+    0,
+    5
+  );
+  const tailLength = clamp(0.3 + t.speed * 0.7 + t.swim * 0.5 + next() * 0.25, 0.2, 1.65);
+  const eyeScale = clamp(0.08 + t.social * 0.07 + next() * 0.06 + cute * 0.04, 0.06, 0.24);
+  const bodyRadius = 0.72 + cute * 0.07;
+  const appendageLength = clamp(
+    (0.28 + t.speed * 0.45 + t.carnivore * 0.35 + next() * 0.24) * (1 - cute * 0.14),
+    0.18,
+    1.18
+  );
+
+  return {
+    seed: opts.seed || 1,
+    role,
+    appendageType,
+    appendageCount,
+    appendageLength,
+    dorsalCount,
+    tailLength,
+    eyeScale,
+    bodyScale,
+    bodyRadius,
+  };
+}
+
+function applyPhenotype(mesh, baseColor, profile) {
+  removePhenotype(mesh);
+  mesh.material.transparent = true;
+  mesh.material.opacity = 0.2;
+
+  const bodyMat = new THREE.MeshStandardMaterial({
+    color: baseColor,
+    roughness: 0.72,
+    metalness: 0.08,
+  });
+  const accentMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(baseColor).offsetHSL(0.04, 0.05, 0.12),
+    roughness: 0.56,
+    metalness: 0.15,
+  });
+  const eyeMat = new THREE.MeshStandardMaterial({ color: 0xf5f8ff, roughness: 0.4, metalness: 0.3 });
+
+  const tintMaterials = [bodyMat, accentMat];
+  const rig = new THREE.Group();
+  const appendages = [];
+  const dorsal = [];
+
+  const body = new THREE.Mesh(new THREE.SphereGeometry(profile.bodyRadius, 14, 14), bodyMat);
+  body.scale.copy(profile.bodyScale);
+  rig.add(body);
+
+  for (let i = 0; i < profile.appendageCount; i += 1) {
+    const ang = (i / profile.appendageCount) * Math.PI * 2;
+    const dir = new THREE.Vector3(Math.cos(ang), 0, Math.sin(ang));
+    const y = profile.appendageType === "leg" ? -profile.bodyScale.y * 0.55 : 0;
+    let limb;
+    if (profile.appendageType === "fin") {
+      limb = new THREE.Mesh(
+        new THREE.BoxGeometry(profile.appendageLength * 0.2, profile.appendageLength * 0.07, profile.appendageLength),
+        accentMat
+      );
+      limb.position.copy(dir.clone().multiplyScalar(profile.bodyScale.x * 0.65));
+      limb.position.y = y;
+      limb.lookAt(limb.position.clone().add(dir));
+    } else if (profile.appendageType === "leg") {
+      limb = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.05, 0.08, profile.appendageLength, 7),
+        accentMat
+      );
+      limb.position.copy(dir.clone().multiplyScalar(profile.bodyScale.x * 0.58));
+      limb.position.y = y - profile.appendageLength * 0.35;
+      limb.rotation.z = Math.sin(ang) * 0.25;
+    } else {
+      limb = new THREE.Mesh(
+        new THREE.ConeGeometry(0.08, profile.appendageLength, 8),
+        accentMat
+      );
+      limb.position.copy(dir.clone().multiplyScalar(profile.bodyScale.x * 0.68));
+      limb.position.y = y;
+      limb.lookAt(limb.position.clone().add(dir));
+      limb.rotateX(Math.PI / 2);
+    }
+    appendages.push({
+      mesh: limb,
+      rest: limb.rotation.clone(),
+      phase: (i / profile.appendageCount) * Math.PI * 2,
+    });
+    rig.add(limb);
+  }
+
+  for (let i = 0; i < profile.dorsalCount; i += 1) {
+    const spike = new THREE.Mesh(
+      new THREE.ConeGeometry(0.07, 0.3 + i * 0.05, 8),
+      accentMat
+    );
+    spike.position.set(
+      -0.2 + i * 0.22 - profile.dorsalCount * 0.05,
+      profile.bodyScale.y * 0.62,
+      0
+    );
+    spike.rotation.z = Math.PI;
+    dorsal.push({
+      mesh: spike,
+      rest: spike.rotation.clone(),
+      phase: i * 0.75,
+    });
+    rig.add(spike);
+  }
+
+  const tail = new THREE.Mesh(
+    new THREE.ConeGeometry(0.09, profile.tailLength, 9),
+    accentMat
+  );
+  tail.position.set(0, 0, -profile.bodyScale.z * 0.95);
+  tail.rotation.x = Math.PI / 2;
+  rig.add(tail);
+
+  const eyeLeft = new THREE.Mesh(new THREE.SphereGeometry(profile.eyeScale, 10, 10), eyeMat);
+  const eyeRight = eyeLeft.clone();
+  eyeLeft.position.set(-profile.bodyScale.x * 0.22, profile.bodyScale.y * 0.14, profile.bodyScale.z * 0.54);
+  eyeRight.position.set(profile.bodyScale.x * 0.22, profile.bodyScale.y * 0.14, profile.bodyScale.z * 0.54);
+  rig.add(eyeLeft);
+  rig.add(eyeRight);
+
+  mesh.add(rig);
+  mesh.userData.phenotypeRig = {
+    group: rig,
+    body,
+    tail: { mesh: tail, rest: tail.rotation.clone() },
+    appendages,
+    dorsal,
+    tintMaterials,
+    profile,
+    idleSeed: ((profile.seed >>> 0) % 997) / 997,
+  };
+}
+
+function animatePhenotype(mesh, speedNorm, t, dt) {
+  const rig = mesh.userData.phenotypeRig;
+  if (!rig) return;
+
+  const tone = toneProfile();
+  const profile = rig.profile;
+  const speed = clamp(speedNorm, 0, 1);
+  const locomotion = 2.1 + speed * 6.6;
+  const phase = t * locomotion + rig.idleSeed * Math.PI * 2;
+  const cuteMotion = tone.cuteMotion;
+  const idle = (0.12 + speed * 0.88) * (0.92 + cuteMotion * 0.14);
+
+  rig.group.position.y = Math.sin(phase * 0.85) * (0.018 + idle * (0.055 + cuteMotion * 0.015));
+
+  if (rig.body) {
+    rig.body.rotation.z = Math.sin(phase * 0.4) * (0.02 + speed * (0.08 + cuteMotion * 0.03));
+    rig.body.rotation.x = Math.cos(phase * 0.35) * (0.01 + speed * (0.04 + cuteMotion * 0.02));
+  }
+
+  if (rig.tail) {
+    const tailWag = (profile.appendageType === "fin" ? 0.45 : 0.28) + cuteMotion * 0.04;
+    rig.tail.mesh.rotation.y = rig.tail.rest.y + Math.sin(phase * 0.9) * (tailWag * idle);
+    rig.tail.mesh.rotation.x = rig.tail.rest.x + Math.cos(phase * 0.6) * 0.08 * idle;
+  }
+
+  for (const limb of rig.appendages) {
+    if (profile.appendageType === "leg") {
+      limb.mesh.rotation.x =
+        limb.rest.x + Math.sin(phase + limb.phase) * (0.22 + speed * (0.72 + cuteMotion * 0.07));
+      limb.mesh.rotation.z = limb.rest.z + Math.cos(phase * 0.6 + limb.phase) * 0.12;
+      continue;
+    }
+    if (profile.appendageType === "fin") {
+      limb.mesh.rotation.z =
+        limb.rest.z + Math.sin(phase * 0.8 + limb.phase) * (0.14 + speed * (0.28 + cuteMotion * 0.06));
+      limb.mesh.rotation.y = limb.rest.y + Math.cos(phase * 0.7 + limb.phase) * 0.12;
+      continue;
+    }
+    limb.mesh.rotation.x = limb.rest.x + Math.sin(phase * 0.45 + limb.phase) * (0.04 + speed * 0.08);
+  }
+
+  for (const spine of rig.dorsal) {
+    spine.mesh.rotation.x = spine.rest.x + Math.sin(phase * 0.5 + spine.phase) * (0.04 + speed * 0.06);
+    spine.mesh.rotation.z = spine.rest.z + Math.cos(phase * 0.6 + spine.phase) * 0.04;
+  }
+}
+
+function orientMeshToVelocity(mesh, velocity, dt, turnRate) {
+  const v2 = velocity.x * velocity.x + velocity.z * velocity.z;
+  if (v2 < 0.01) return;
+  const targetYaw = Math.atan2(velocity.x, velocity.z);
+  const blend = 1 - Math.exp(-dt * (turnRate || 8));
+  mesh.rotation.y += (targetYaw - mesh.rotation.y) * blend;
+}
+
+const player = {
+  mesh: makeSphere(0xe7f4c6, 1.3, 14),
+  pos: new THREE.Vector3(0, 0, 0),
+  forward: new THREE.Vector3(0, 0, 1),
+  vel: new THREE.Vector3(),
+  energy: 78,
+  health: 100,
+  age: 0,
+  generation: 1,
+  lineage: [],
+  reproductionCooldown: 0,
+  traits: { ...DEFAULT_TRAITS },
+  morphTraits: { ...DEFAULT_TRAITS },
+  renderedMorphTraits: { ...DEFAULT_TRAITS },
+  morphSeed: 911,
+  morphLabel: "balanced legged grazer",
+  morphRefreshTimer: 0,
+  marker: null,
+  metrics: resetMetrics(),
+};
+const PLAYER_HEIGHT_OFFSET = 1.3;
+placeAtSurface(player.pos, PLAYER_HEIGHT_OFFSET);
+player.mesh.position.copy(player.pos);
+scene.add(player.mesh);
+
+function ensurePlayerMarker() {
+  if (player.marker) return;
+  const group = new THREE.Group();
+
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(1.18, 0.055, 10, 36),
+    new THREE.MeshBasicMaterial({ color: 0xb9ffe3, transparent: true, opacity: 0.85 })
+  );
+  ring.rotation.x = Math.PI / 2;
+  ring.position.y = -1.04;
+  group.add(ring);
+
+  const beacon = new THREE.Mesh(
+    new THREE.ConeGeometry(0.13, 0.34, 10),
+    new THREE.MeshBasicMaterial({ color: 0xd9fff3, transparent: true, opacity: 0.9 })
+  );
+  beacon.position.y = 1.86;
+  group.add(beacon);
+
+  player.mesh.add(group);
+  player.marker = { group, ring, beacon };
+}
+
+function createLabelSprite(text, fg, bg) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 128;
+  canvas.height = 64;
+  const ctx = canvas.getContext("2d");
+
+  ctx.clearRect(0, 0, 128, 64);
+  ctx.fillStyle = bg || "rgba(8, 26, 22, 0.78)";
+  ctx.strokeStyle = "rgba(199, 236, 222, 0.75)";
+  ctx.lineWidth = 3;
+  if (typeof ctx.roundRect === "function") {
+    ctx.beginPath();
+    ctx.roundRect(4, 6, 120, 52, 14);
+    ctx.fill();
+    ctx.stroke();
+  } else {
+    ctx.fillRect(4, 6, 120, 52);
+    ctx.strokeRect(4, 6, 120, 52);
+  }
+
+  ctx.fillStyle = fg || "#eafff3";
+  ctx.font = "700 30px 'Avenir Next', sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, 64, 33);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  const mat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(1.55, 0.78, 1);
+  return sprite;
+}
+
+function createMateMarker(mesh, label) {
+  const group = new THREE.Group();
+
+  const ringMaterial = new THREE.MeshBasicMaterial({
+    color: 0x93ddff,
+    transparent: true,
+    opacity: 0.9,
+  });
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(1.08, 0.05, 10, 32), ringMaterial);
+  ring.rotation.x = Math.PI / 2;
+  ring.position.y = -0.92;
+  group.add(ring);
+
+  const beamMaterial = new THREE.MeshBasicMaterial({
+    color: 0x8acfff,
+    transparent: true,
+    opacity: 0.55,
+  });
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.06, 1.05, 8), beamMaterial);
+  beam.position.y = 1.5;
+  group.add(beam);
+
+  const tipMaterial = new THREE.MeshBasicMaterial({
+    color: 0xd2f3ff,
+    transparent: true,
+    opacity: 0.95,
+  });
+  const tip = new THREE.Mesh(new THREE.OctahedronGeometry(0.16, 0), tipMaterial);
+  tip.position.y = 2.08;
+  group.add(tip);
+
+  const tag = createLabelSprite(label || "M", "#e8fff5", "rgba(14, 40, 34, 0.86)");
+  tag.position.y = 2.65;
+  group.add(tag);
+
+  mesh.add(group);
+  return { group, ring, beam, tip, tag, ringMaterial, beamMaterial, tipMaterial };
+}
+
+function createRivalMarker(mesh, label) {
+  const group = new THREE.Group();
+  const warnMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffb56e,
+    transparent: true,
+    opacity: 0.92,
+  });
+  const cone = new THREE.Mesh(new THREE.ConeGeometry(0.17, 0.35, 10), warnMaterial);
+  cone.position.y = 1.72;
+  group.add(cone);
+
+  const tag = createLabelSprite(label || "R", "#ffe8d6", "rgba(52, 22, 10, 0.84)");
+  tag.position.y = 2.25;
+  tag.scale.set(1.4, 0.72, 1);
+  group.add(tag);
+  mesh.add(group);
+  return { group, cone, tag, warnMaterial };
+}
+
+function createMateLockVisual() {
+  const positions = new Float32Array(6);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+
+  const lineMaterial = new THREE.LineBasicMaterial({
+    color: 0x95dcff,
+    transparent: true,
+    opacity: 0.84,
+  });
+  const line = new THREE.Line(geometry, lineMaterial);
+  line.frustumCulled = false;
+
+  const tipMaterial = new THREE.MeshBasicMaterial({
+    color: 0xdff5ff,
+    transparent: true,
+    opacity: 0.94,
+  });
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.36, 10), tipMaterial);
+  tip.rotation.x = Math.PI;
+
+  const group = new THREE.Group();
+  group.visible = false;
+  group.add(line);
+  group.add(tip);
+  scene.add(group);
+
+  return { group, line, tip, positions, lineMaterial, tipMaterial };
+}
+
+const mateLockVisual = createMateLockVisual();
+const mateLockStart = new THREE.Vector3();
+const mateLockEnd = new THREE.Vector3();
+const mateLockDir = new THREE.Vector3();
+const mateLockTipPos = new THREE.Vector3();
+
+function phenotypeLabel(traits, profile) {
+  const diet =
+    traits.carnivore > traits.herbivore + 0.16
+      ? "hunter"
+      : traits.herbivore > traits.carnivore + 0.16
+        ? "grazer"
+        : "omnivore";
+  const locomotion =
+    profile.appendageType === "fin"
+      ? "finned"
+      : profile.appendageType === "leg"
+        ? "legged"
+        : "spined";
+  const frame =
+    profile.bodyScale.y > 1.22
+      ? "towering"
+      : profile.bodyScale.y < 0.92
+        ? "compact"
+        : "balanced";
+  return `${frame} ${locomotion} ${diet}`;
+}
+
+function refreshPlayerPhenotype(force) {
+  const source = player.morphTraits || player.traits;
+  if (!force && traitDistance(source, player.renderedMorphTraits) < BALANCE.phenotype.refreshThreshold) {
+    return false;
+  }
+  const profile = makePhenotypeProfile({
+    seed: player.morphSeed,
+    role: "player",
+    traits: source,
+  });
+  applyPhenotype(player.mesh, 0xe7f4c6, profile);
+  ensurePlayerMarker();
+  setPhenotypeTint(player.mesh, 0xeeffd8);
+  player.mesh.material.opacity = 0.44;
+  player.mesh.material.emissive.setHex(0x174f3f);
+  player.mesh.material.emissiveIntensity = 0.56;
+  player.renderedMorphTraits = cloneTraits(source);
+  player.morphLabel = phenotypeLabel(source, profile);
+  return true;
+}
+
+function setActionMessage(message, seconds) {
+  actionMessage = message;
+  actionMessageTimer = seconds || 2.6;
+}
+
+function focusPlayerCamera(silent) {
+  camPan.set(0, 0, 0);
+  camDist = clamp(camDist, 12, 24);
+  camPitch = clamp(camPitch, 0.2, 1.0);
+  if (!silent) setActionMessage("Camera focused on organism.", 1.6);
+}
+
+function resetPlayerMorphology(seed) {
+  player.morphSeed = seed;
+  player.morphTraits = cloneTraits(player.traits);
+  player.renderedMorphTraits = cloneTraits(player.traits);
+  player.morphRefreshTimer = 0;
+  refreshPlayerPhenotype(true);
+}
+
+function buildLiveMorphTarget() {
+  const m = player.metrics;
+  const age = Math.max(player.age, 1);
+  const totalFood = m.plants + m.prey;
+  const plantRatio = totalFood > 0 ? m.plants / totalFood : player.traits.herbivore;
+  const preyRatio = totalFood > 0 ? m.prey / totalFood : player.traits.carnivore;
+  const chaseRate = m.chaseAttempts > 0 ? m.chaseSuccess / m.chaseAttempts : 0;
+  const activeRatio = clamp(m.activeTime / age, 0, 1);
+  const heatRatio = clamp(m.heatExposure / age, 0, 1);
+  const waterRatio = clamp(m.waterExposure / age, 0, 1);
+  const socialRatio = clamp(m.socialExposure / age, 0, 1);
+  const energyRatio = clamp(player.energy / Math.max(1, maxEnergy()), 0, 1);
+
+  const target = {
+    speed: clamp(player.traits.speed * 0.72 + chaseRate * 0.2 + activeRatio * 0.08, 0, 1),
+    stamina: clamp(player.traits.stamina * 0.72 + activeRatio * 0.18 + energyRatio * 0.1, 0, 1),
+    herbivore: clamp(player.traits.herbivore * 0.7 + plantRatio * 0.3, 0, 1),
+    carnivore: clamp(player.traits.carnivore * 0.7 + preyRatio * 0.3, 0, 1),
+    swim: clamp(player.traits.swim * 0.75 + waterRatio * 0.25, 0, 1),
+    heat: clamp(player.traits.heat * 0.75 + heatRatio * 0.25, 0, 1),
+    social: clamp(player.traits.social * 0.68 + socialRatio * 0.32, 0, 1),
+  };
+
+  const dietSum = target.herbivore + target.carnivore;
+  if (dietSum > BALANCE.phenotype.maxDietSum) {
+    target.herbivore /= dietSum / BALANCE.phenotype.maxDietSum;
+    target.carnivore /= dietSum / BALANCE.phenotype.maxDietSum;
+  }
+  return target;
+}
+
+function updatePlayerMorphology(dt) {
+  const target = buildLiveMorphTarget();
+  const blend = 1 - Math.exp(-dt * BALANCE.phenotype.liveBlendRate);
+  for (const key of TRAIT_KEYS) {
+    player.morphTraits[key] = clamp(
+      player.morphTraits[key] + (target[key] - player.morphTraits[key]) * blend,
+      0,
+      1
+    );
+  }
+
+  player.morphRefreshTimer += dt;
+  if (player.morphRefreshTimer >= BALANCE.phenotype.refreshMinSeconds) {
+    const refreshed = refreshPlayerPhenotype(false);
+    if (refreshed) player.morphRefreshTimer = 0;
+  }
+}
+
+function resetMetrics() {
+  return {
+    plants: 0,
+    prey: 0,
+    chaseAttempts: 0,
+    chaseSuccess: 0,
+    threatEvents: 0,
+    threatEscapes: 0,
+    heatExposure: 0,
+    waterExposure: 0,
+    socialExposure: 0,
+    activeTime: 0,
+    distance: 0,
+  };
+}
+
+function cloneTraits(source) {
+  const out = {};
+  for (const key of TRAIT_KEYS) out[key] = source[key];
+  return out;
+}
+
+function traitDistance(a, b) {
+  let sum = 0;
+  for (const key of TRAIT_KEYS) {
+    sum += Math.abs((a[key] || 0) - (b[key] || 0));
+  }
+  return sum / TRAIT_KEYS.length;
+}
+
+function sanitizeTraits(source) {
+  const out = {};
+  for (const key of TRAIT_KEYS) {
+    const v = Number(source && source[key]);
+    out[key] = Number.isFinite(v) ? clamp(v, 0, 1) : DEFAULT_TRAITS[key];
+  }
+  return out;
+}
+
+function sanitizeLineage(source) {
+  if (!Array.isArray(source)) return [];
+  const trimmed = source.slice(-BALANCE.save.maxLineageEntries);
+  return trimmed
+    .filter((entry) => entry && typeof entry === "object")
+    .map((entry, idx) => ({
+      generation: clamp(Number(entry.generation) || idx + 1, 1, 9999),
+      age: clamp(Number(entry.age) || 0, 0, 99999),
+      food: {
+        plants: clamp(Number(entry.food && entry.food.plants) || 0, 0, 99999),
+        prey: clamp(Number(entry.food && entry.food.prey) || 0, 0, 99999),
+      },
+      traits: sanitizeTraits(entry.traits),
+    }));
+}
+
+function setWorldFromGeneration(generation) {
+  const tier = clamp(
+    1 + Math.floor(generation / BALANCE.world.generationsPerTier),
+    1,
+    BALANCE.world.maxTier
+  );
+  WORLD.tier = tier;
+  WORLD.radius = WORLD.baseRadius + (tier - 1) * BALANCE.world.radiusPerTier;
+  WORLD.hazardScale = 1 + (tier - 1) * BALANCE.world.hazardScalePerTier;
+}
+
+function initPlayerLifecycle(startEnergyRatio) {
+  player.pos.set(0, 0, 0);
+  placeAtSurface(player.pos, PLAYER_HEIGHT_OFFSET);
+  player.vel.set(0, 0, 0);
+  player.forward.set(0, 0, 1);
+  player.age = 0;
+  player.health = 100;
+  player.energy = maxEnergy() * startEnergyRatio;
+  player.reproductionCooldown = 0;
+  player.morphRefreshTimer = 0;
+  player.metrics = resetMetrics();
+  player.mesh.position.copy(player.pos);
+}
+
+function storageSupported() {
+  try {
+    return typeof window !== "undefined" && !!window.localStorage;
+  } catch {
+    return false;
+  }
+}
+
+function saveSnapshot(reason) {
+  if (!storageSupported()) return false;
+  const payload = {
+    schema: BALANCE.save.schema,
+    savedAt: Date.now(),
+    reason,
+    toneIndex: toneState.index,
+    telemetry: {
+      births: telemetry.births,
+      deaths: telemetry.deaths,
+    },
+    player: {
+      generation: player.generation,
+      age: Number(player.age.toFixed(3)),
+      energy: Number(player.energy.toFixed(3)),
+      health: Number(player.health.toFixed(3)),
+      reproductionCooldown: Number(player.reproductionCooldown.toFixed(3)),
+      traits: { ...player.traits },
+      morphTraits: cloneTraits(player.morphTraits),
+      morphSeed: player.morphSeed,
+      lineage: player.lineage.slice(-BALANCE.save.maxLineageEntries),
+      pos: {
+        x: Number(player.pos.x.toFixed(3)),
+        z: Number(player.pos.z.toFixed(3)),
+      },
+      cam: {
+        yaw: Number(camYaw.toFixed(4)),
+        pitch: Number(camPitch.toFixed(4)),
+        dist: Number(camDist.toFixed(4)),
+        panX: Number(camPan.x.toFixed(4)),
+        panZ: Number(camPan.z.toFixed(4)),
+      },
+    },
+  };
+
+  try {
+    window.localStorage.setItem(BALANCE.save.key, JSON.stringify(payload));
+    saveState.lastSavedAt = payload.savedAt;
+    saveState.lastReason = reason;
+    saveState.error = "";
+    return true;
+  } catch {
+    saveState.error = "save failed";
+    return false;
+  }
+}
+
+function loadSnapshot() {
+  if (!storageSupported()) return false;
+  let raw;
+  try {
+    raw = window.localStorage.getItem(BALANCE.save.key);
+  } catch {
+    saveState.error = "load failed";
+    return false;
+  }
+  if (!raw) return false;
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    saveState.error = "save corrupted";
+    return false;
+  }
+  if (!parsed || parsed.schema !== BALANCE.save.schema || !parsed.player) {
+    saveState.error = "save schema mismatch";
+    return false;
+  }
+
+  const nextToneIndex = Number(parsed.toneIndex);
+  if (Number.isFinite(nextToneIndex)) setToneIndex(nextToneIndex);
+  if (parsed.telemetry) {
+    telemetry.births = clamp(Number(parsed.telemetry.births) || 0, 0, 999999);
+    telemetry.deaths = clamp(Number(parsed.telemetry.deaths) || 0, 0, 999999);
+  }
+
+  const state = parsed.player;
+  player.generation = clamp(Math.floor(Number(state.generation) || 1), 1, 9999);
+  player.traits = sanitizeTraits(state.traits);
+  player.morphTraits = sanitizeTraits(state.morphTraits || state.traits);
+  player.renderedMorphTraits = cloneTraits(player.morphTraits);
+  player.morphSeed = clamp(Math.floor(Number(state.morphSeed) || player.generation * 911), 1, 2147483646);
+  player.morphRefreshTimer = 0;
+  refreshPlayerPhenotype(true);
+  player.lineage = sanitizeLineage(state.lineage);
+  setWorldFromGeneration(player.generation);
+  rebuildBiomeVisuals();
+  syncPopulation();
+
+  player.age = clamp(Number(state.age) || 0, 0, 99999);
+  player.health = clamp(Number(state.health) || 100, 0, 100);
+  player.reproductionCooldown = clamp(Number(state.reproductionCooldown) || 0, 0, 9999);
+  player.pos.set(Number(state.pos && state.pos.x) || 0, 0, Number(state.pos && state.pos.z) || 0);
+  limitToWorld(player.pos);
+  placeAtSurface(player.pos, PLAYER_HEIGHT_OFFSET);
+  player.vel.set(0, 0, 0);
+  player.forward.set(0, 0, 1);
+  player.energy = clamp(Number(state.energy) || maxEnergy() * BALANCE.player.offspringStartEnergyRatio, 0, maxEnergy());
+  player.metrics = resetMetrics();
+  player.mesh.position.copy(player.pos);
+
+  if (state.cam) {
+    const nextYaw = Number(state.cam.yaw);
+    const nextPitch = Number(state.cam.pitch);
+    const nextDist = Number(state.cam.dist);
+    const nextPanX = Number(state.cam.panX);
+    const nextPanZ = Number(state.cam.panZ);
+    if (Number.isFinite(nextYaw)) camYaw = nextYaw;
+    if (Number.isFinite(nextPitch)) camPitch = clamp(nextPitch, 0.12, 1.16);
+    if (Number.isFinite(nextDist)) camDist = clamp(nextDist, 10, 34);
+    if (Number.isFinite(nextPanX)) camPan.x = nextPanX;
+    if (Number.isFinite(nextPanZ)) camPan.z = nextPanZ;
+  }
+
+  ACTIVE_CHASE.clear();
+  ACTIVE_THREATS.clear();
+  clearGroup(populations.mates);
+  clearGroup(populations.rivals);
+
+  saveState.loadedFromDisk = true;
+  saveState.lastSavedAt = Number(parsed.savedAt) || 0;
+  saveState.lastReason = "loaded";
+  saveState.error = "";
+  return true;
+}
+
+function clearSnapshot() {
+  if (!storageSupported()) return;
+  try {
+    window.localStorage.removeItem(BALANCE.save.key);
+    saveState.lastReason = "cleared";
+    saveState.lastSavedAt = 0;
+    saveState.error = "";
+  } catch {
+    saveState.error = "clear failed";
+  }
+}
+
+function newLineage(clearSave) {
+  if (clearSave) clearSnapshot();
+  telemetry.births = 0;
+  telemetry.deaths = 0;
+  player.generation = 1;
+  player.traits = { ...DEFAULT_TRAITS };
+  resetPlayerMorphology(player.generation * 911 + 17);
+  player.lineage = [];
+  setWorldFromGeneration(player.generation);
+  rebuildBiomeVisuals();
+  syncPopulation();
+  initPlayerLifecycle(BALANCE.player.offspringStartEnergyRatio);
+  clearGroup(populations.mates);
+  clearGroup(populations.rivals);
+  saveState.loadedFromDisk = false;
+}
+
+const populations = {
+  flora: [],
+  prey: [],
+  predators: [],
+  mates: [],
+  rivals: [],
+};
+
+let idCounter = 1;
+function nextId() {
+  const id = idCounter;
+  idCounter += 1;
+  return id;
+}
+
+function spawnFlora() {
+  const mesh = makeSphere(0x63b16f, rand(0.56, 0.9), 8);
+  const p = randVec(WORLD.radius - 6);
+  placeAtSurface(p, 0.52);
+  mesh.position.copy(p);
+  scene.add(mesh);
+  populations.flora.push({
+    id: nextId(),
+    mesh,
+    alive: true,
+    respawn: 0,
+    energy: rand(9, 16),
+  });
+}
+
+function spawnPrey() {
+  const id = nextId();
+  const mesh = makeSphere(0xc5db78, rand(0.64, 0.95), 10);
+  const p = randVec(WORLD.radius - 7);
+  placeAtSurface(p, 0.68);
+  mesh.position.copy(p);
+  applyPhenotype(
+    mesh,
+    0xc5db78,
+    makePhenotypeProfile({
+      seed: id * 33 + 7,
+      role: "prey",
+      traits: {
+        speed: rand(0.25, 0.9),
+        stamina: rand(0.2, 0.8),
+        herbivore: rand(0.55, 0.98),
+        carnivore: rand(0.05, 0.35),
+        swim: rand(0.05, 0.55),
+        heat: rand(0.1, 0.65),
+        social: rand(0.2, 0.9),
+      },
+    })
+  );
+  scene.add(mesh);
+  populations.prey.push({
+    id,
+    mesh,
+    vel: new THREE.Vector3(),
+    wander: randVec(1),
+    alive: true,
+    respawn: 0,
+    speed: rand(4.2, 6.6),
+    heightOffset: 0.68,
+    social: rand(0.28, 0.92),
+  });
+}
+
+function spawnPredator() {
+  const id = nextId();
+  const mesh = makeSphere(0xce735e, rand(0.9, 1.25), 12);
+  const p = randVec(WORLD.radius - 10);
+  placeAtSurface(p, 1.1);
+  mesh.position.copy(p);
+  applyPhenotype(
+    mesh,
+    0xce735e,
+    makePhenotypeProfile({
+      seed: id * 61 + 13,
+      role: "predator",
+      traits: {
+        speed: rand(0.45, 0.95),
+        stamina: rand(0.3, 0.95),
+        herbivore: rand(0.0, 0.2),
+        carnivore: rand(0.65, 1.0),
+        swim: rand(0.0, 0.45),
+        heat: rand(0.2, 0.9),
+        social: rand(0.0, 0.5),
+      },
+    })
+  );
+  scene.add(mesh);
+  populations.predators.push({
+    id,
+    mesh,
+    vel: new THREE.Vector3(),
+    wander: randVec(1),
+    speed: rand(5.2, 7.8),
+    heightOffset: 1.1,
+    pack: rand(0.22, 0.78),
+  });
+}
+
+function clearGroup(group) {
+  for (const e of group) {
+    scene.remove(e.mesh);
+    disposeMeshTree(e.mesh);
+  }
+  group.length = 0;
+  if (group === populations.mates && mateLockVisual) {
+    mateLockVisual.group.visible = false;
+  }
+}
+
+function spawnMateCluster() {
+  clearGroup(populations.mates);
+  clearGroup(populations.rivals);
+  const tone = toneProfile();
+  const reqScale = tone.mateRequirementScale;
+
+  const root = player.pos.clone();
+  const angle = rand(0, Math.PI * 2);
+  const dist = rand(8, 18);
+  root.x += Math.cos(angle) * dist;
+  root.z += Math.sin(angle) * dist;
+  limitToWorld(root);
+  const mateCount = 2;
+  for (let i = 0; i < mateCount; i += 1) {
+    const id = nextId();
+    const mesh = makeSphere(0x9cd8ff, 1.12, 14);
+    const p = root.clone().add(randVec(6));
+    placeAtSurface(p, 1.2);
+    mesh.position.copy(p);
+    scene.add(mesh);
+
+    const mods = {
+      speed: rand(-0.07, 0.07),
+      stamina: rand(-0.07, 0.07),
+      herbivore: rand(-0.07, 0.07),
+      carnivore: rand(-0.07, 0.07),
+      swim: rand(-0.07, 0.07),
+      heat: rand(-0.07, 0.07),
+      social: rand(-0.07, 0.07),
+    };
+
+    const traitKeys = Object.keys(mods);
+    const bonus = traitKeys[(Math.random() * traitKeys.length) | 0];
+    const cost = traitKeys[(Math.random() * traitKeys.length) | 0];
+    mods[bonus] += rand(0.08, 0.14);
+    mods[cost] -= rand(0.03, 0.08);
+
+    const requirement = i === 0
+      ? {
+          type: "energy",
+          min: clamp(BALANCE.player.reproductionEnergyRatio * reqScale, 0.5, 0.92),
+        }
+      : Math.random() < 0.5
+        ? { type: "chase", min: Math.max(1, Math.round(2 * reqScale)) }
+        : { type: "forage", min: Math.max(2, Math.round(6 * reqScale)) };
+
+    populations.mates.push({
+      id,
+      slot: i + 1,
+      mesh,
+      mods,
+      pulse: rand(0, Math.PI * 2),
+      requirement,
+      captured: false,
+      heightOffset: 1.2,
+      marker: createMateMarker(mesh, `M${i + 1}`),
+    });
+    applyPhenotype(
+      mesh,
+      0x9cd8ff,
+      makePhenotypeProfile({
+        seed: id * 19 + i,
+        role: "mate",
+        traits: {
+          speed: clamp(0.45 + mods.speed, 0, 1),
+          stamina: clamp(0.45 + mods.stamina, 0, 1),
+          herbivore: clamp(0.45 + mods.herbivore, 0, 1),
+          carnivore: clamp(0.45 + mods.carnivore, 0, 1),
+          swim: clamp(0.35 + mods.swim, 0, 1),
+          heat: clamp(0.35 + mods.heat, 0, 1),
+          social: clamp(0.6 + mods.social, 0, 1),
+        },
+      })
+    );
+  }
+
+  for (let i = 0; i < populations.mates.length; i += 1) {
+    const id = nextId();
+    const mesh = makeSphere(0xf2b876, 1.0, 10);
+    const p = root.clone().add(randVec(14));
+    placeAtSurface(p, 1.0);
+    mesh.position.copy(p);
+    applyPhenotype(
+      mesh,
+      0xf2b876,
+      makePhenotypeProfile({
+        seed: id * 17 + i,
+        role: "rival",
+        traits: {
+          speed: rand(0.35, 0.85),
+          stamina: rand(0.25, 0.7),
+          herbivore: rand(0.2, 0.6),
+          carnivore: rand(0.2, 0.8),
+          swim: rand(0.0, 0.5),
+          heat: rand(0.2, 0.8),
+          social: rand(0.3, 0.75),
+        },
+      })
+    );
+    scene.add(mesh);
+    populations.rivals.push({
+      id,
+      slot: i + 1,
+      mesh,
+      targetIndex: i,
+      claimTimer: 0,
+      speed: rand(4.2, 6.1) * tone.rivalSpeedMult,
+      heightOffset: 1.0,
+      marker: createRivalMarker(mesh, `R${i + 1}`),
+    });
+  }
+}
+
+function desiredPopulation() {
+  return {
+    flora: BALANCE.populations.floraBase + WORLD.tier * BALANCE.populations.floraPerTier,
+    prey: BALANCE.populations.preyBase + WORLD.tier * BALANCE.populations.preyPerTier,
+    predators:
+      BALANCE.populations.predatorBase + WORLD.tier * BALANCE.populations.predatorPerTier,
+  };
+}
+
+function syncPopulation() {
+  const target = desiredPopulation();
+  while (populations.flora.length < target.flora) spawnFlora();
+  while (populations.prey.length < target.prey) spawnPrey();
+  while (populations.predators.length < target.predators) spawnPredator();
+}
+
+const chaseProbe = new THREE.Vector3();
+const threatProbe = new THREE.Vector3();
+const worldUp = new THREE.Vector3(0, 1, 0);
+const moveForward = new THREE.Vector3();
+const moveRight = new THREE.Vector3();
+const socialAlign = new THREE.Vector3();
+const socialCohesion = new THREE.Vector3();
+const socialSeparation = new THREE.Vector3();
+const socialTemp = new THREE.Vector3();
+
+function maxEnergy() {
+  return BALANCE.player.maxEnergyBase + player.traits.stamina * BALANCE.player.maxEnergyFromStamina;
+}
+
+function movementSpeed() {
+  return BALANCE.player.moveSpeedBase + player.traits.speed * BALANCE.player.moveSpeedFromTrait;
+}
+
+function canReproduce() {
+  const tone = toneProfile();
+  const threshold =
+    maxEnergy() * BALANCE.player.reproductionEnergyRatio * tone.reproductionEnergyMult;
+  const healthMin = clamp(
+    BALANCE.player.reproductionHealthMin + tone.reproductionHealthAdd,
+    5,
+    95
+  );
+  return (
+    player.age >= BALANCE.player.reproductionAgeMin * tone.reproductionAgeMult &&
+    player.energy >= threshold &&
+    player.health > healthMin &&
+    player.reproductionCooldown <= 0
+  );
+}
+
+function requirementMet(req) {
+  if (req.type === "energy") return player.energy >= maxEnergy() * req.min;
+  if (req.type === "chase") return player.metrics.chaseSuccess >= req.min;
+  if (req.type === "forage") return player.metrics.plants >= req.min;
+  return true;
+}
+
+function requirementText(req) {
+  if (!req) return "unknown";
+  if (req.type === "energy") return `energy >= ${Math.round(req.min * 100)}%`;
+  if (req.type === "chase") return `chase successes >= ${req.min}`;
+  if (req.type === "forage") return `plants eaten >= ${req.min}`;
+  return `${req.type}:${req.min}`;
+}
+
+function nearestMateState() {
+  let nearestAny = null;
+  let nearestAnyDist = 9999;
+  let nearestEligible = null;
+  let nearestEligibleDist = 9999;
+
+  for (const mate of populations.mates) {
+    const d = mate.mesh.position.distanceTo(player.mesh.position);
+    if (d < nearestAnyDist) {
+      nearestAny = mate;
+      nearestAnyDist = d;
+    }
+    if (requirementMet(mate.requirement) && d < nearestEligibleDist) {
+      nearestEligible = mate;
+      nearestEligibleDist = d;
+    }
+  }
+
+  return {
+    nearestAny,
+    nearestAnyDist,
+    nearestEligible,
+    nearestEligibleDist,
+  };
+}
+
+function updateMateLockVisual(state) {
+  if (!mateLockVisual) return;
+  if (!canReproduce() || !state) {
+    mateLockVisual.group.visible = false;
+    return;
+  }
+
+  const target = state.nearestEligible || state.nearestAny;
+  if (!target || !target.mesh) {
+    mateLockVisual.group.visible = false;
+    return;
+  }
+
+  mateLockStart.copy(player.mesh.position);
+  mateLockEnd.copy(target.mesh.position);
+  mateLockStart.y += 0.58;
+  mateLockEnd.y += 0.58;
+
+  mateLockDir.copy(mateLockEnd).sub(mateLockStart);
+  const distance = mateLockDir.length();
+  if (distance < 0.01) {
+    mateLockVisual.group.visible = false;
+    return;
+  }
+
+  const position = mateLockVisual.positions;
+  position[0] = mateLockStart.x;
+  position[1] = mateLockStart.y;
+  position[2] = mateLockStart.z;
+  position[3] = mateLockEnd.x;
+  position[4] = mateLockEnd.y;
+  position[5] = mateLockEnd.z;
+  mateLockVisual.line.geometry.attributes.position.needsUpdate = true;
+  mateLockVisual.line.geometry.computeBoundingSphere();
+
+  const inRange =
+    !!state.nearestEligible &&
+    state.nearestEligible.id === target.id &&
+    state.nearestEligibleDist <= BALANCE.player.reproductionInteractDistance;
+  const eligible = requirementMet(target.requirement);
+  const lineColor = inRange ? 0xb8ff77 : eligible ? 0x8edcff : 0x748392;
+  mateLockVisual.lineMaterial.color.setHex(lineColor);
+  mateLockVisual.tipMaterial.color.setHex(inRange ? 0xeeffdb : eligible ? 0xd6f4ff : 0xcfd7df);
+  mateLockVisual.lineMaterial.opacity = inRange ? 0.96 : 0.84;
+
+  mateLockDir.normalize();
+  mateLockTipPos.copy(mateLockEnd).addScaledVector(mateLockDir, -0.34);
+  mateLockVisual.tip.position.copy(mateLockTipPos);
+  mateLockVisual.tip.quaternion.setFromUnitVectors(worldUp, mateLockDir);
+  mateLockVisual.tip.scale.setScalar(inRange ? 1.18 : 1);
+
+  mateLockVisual.group.visible = true;
+}
+
+function consumeFlora(node) {
+  node.alive = false;
+  node.respawn =
+    rand(BALANCE.feeding.floraRespawnMin, BALANCE.feeding.floraRespawnMax) /
+    (1 + WORLD.tier * BALANCE.feeding.floraTierRespawnScale);
+  node.mesh.visible = false;
+  const gain = node.energy * (BALANCE.feeding.floraGainBase + player.traits.herbivore);
+  player.energy = clamp(player.energy + gain, 0, maxEnergy());
+  player.metrics.plants += 1;
+}
+
+function consumePrey(prey) {
+  prey.alive = false;
+  prey.respawn =
+    rand(BALANCE.feeding.preyRespawnMin, BALANCE.feeding.preyRespawnMax) /
+    (1 + WORLD.tier * BALANCE.feeding.preyTierRespawnScale);
+  prey.mesh.visible = false;
+  const gain =
+    rand(BALANCE.feeding.preyEnergyMin, BALANCE.feeding.preyEnergyMax) *
+    (BALANCE.feeding.preyGainBase + player.traits.carnivore);
+  player.energy = clamp(player.energy + gain, 0, maxEnergy());
+  player.metrics.prey += 1;
+  const stamp = ACTIVE_CHASE.get(prey.id);
+  if (stamp !== undefined && stamp > simTime - BALANCE.feeding.chaseSuccessWindow) {
+    player.metrics.chaseSuccess += 1;
+  }
+  ACTIVE_CHASE.delete(prey.id);
+}
+
+function damagePlayer(amount) {
+  player.health = clamp(player.health - amount, 0, 100);
+}
+
+function respawnEntity(entity, radiusMin, radiusMax, y) {
+  const p = randVec(rand(radiusMin, radiusMax));
+  placeAtSurface(p, y);
+  entity.mesh.position.copy(p);
+  entity.mesh.visible = true;
+}
+
+function updateFlora(dt) {
+  for (const node of populations.flora) {
+    if (!node.alive) {
+      node.respawn -= dt;
+      if (node.respawn <= 0) {
+        node.alive = true;
+        respawnEntity(node, WORLD.radius * 0.1, WORLD.radius - 6, 0.52);
+      }
+      continue;
+    }
+    const dist = node.mesh.position.distanceTo(player.mesh.position);
+    if (dist < 2.15) consumeFlora(node);
+  }
+}
+
+function updatePrey(dt) {
+  for (const prey of populations.prey) {
+    if (!prey.alive) {
+      prey.respawn -= dt;
+      if (prey.respawn <= 0) {
+        prey.alive = true;
+        prey.wander = randVec(1);
+        respawnEntity(prey, WORLD.radius * 0.14, WORLD.radius - 8, prey.heightOffset);
+      }
+      continue;
+    }
+
+    const pos = prey.mesh.position;
+    let desired = prey.wander.clone();
+
+    const toPlayer = chaseProbe.copy(player.mesh.position).sub(pos);
+    const playerDist = toPlayer.length();
+    if (playerDist < 9) {
+      desired.addScaledVector(toPlayer.normalize(), -2.4);
+    }
+
+    let nearestPred = null;
+    let nearestPredDist = 9999;
+    for (const pred of populations.predators) {
+      const d = pred.mesh.position.distanceTo(pos);
+      if (d < nearestPredDist) {
+        nearestPredDist = d;
+        nearestPred = pred;
+      }
+    }
+
+    if (nearestPred && nearestPredDist < 11) {
+      desired.add(
+        pos.clone().sub(nearestPred.mesh.position).normalize().multiplyScalar(2.7)
+      );
+    }
+
+    socialAlign.set(0, 0, 0);
+    socialCohesion.set(0, 0, 0);
+    socialSeparation.set(0, 0, 0);
+    let neighbors = 0;
+    const flockRadiusSq = BALANCE.social.preyFlockRadius * BALANCE.social.preyFlockRadius;
+    const separationSq =
+      BALANCE.social.preySeparationRadius * BALANCE.social.preySeparationRadius;
+
+    for (const other of populations.prey) {
+      if (other === prey || !other.alive) continue;
+      const d2 = socialTemp.copy(other.mesh.position).sub(pos).lengthSq();
+      if (d2 > flockRadiusSq || d2 < 0.0001) continue;
+
+      neighbors += 1;
+      socialAlign.add(other.vel);
+      socialCohesion.add(other.mesh.position);
+
+      if (d2 < separationSq) {
+        const invDist = 1 / Math.sqrt(d2 + 0.0001);
+        socialSeparation.addScaledVector(socialTemp, -invDist);
+      }
+    }
+
+    if (neighbors > 0) {
+      const socialWeight = prey.social;
+
+      socialAlign.divideScalar(neighbors);
+      if (socialAlign.lengthSq() > 0.0001) {
+        socialAlign
+          .normalize()
+          .multiplyScalar(BALANCE.social.preyAlignmentWeight * socialWeight);
+        desired.add(socialAlign);
+      }
+
+      socialCohesion.divideScalar(neighbors).sub(pos);
+      if (socialCohesion.lengthSq() > 0.0001) {
+        socialCohesion
+          .normalize()
+          .multiplyScalar(BALANCE.social.preyCohesionWeight * socialWeight);
+        desired.add(socialCohesion);
+      }
+
+      if (socialSeparation.lengthSq() > 0.0001) {
+        socialSeparation
+          .normalize()
+          .multiplyScalar(BALANCE.social.preySeparationWeight * (0.7 + socialWeight * 0.5));
+        desired.add(socialSeparation);
+      }
+    }
+
+    if (Math.random() < 0.013) prey.wander = randVec(1);
+    desired.normalize();
+    prey.vel.lerp(desired.multiplyScalar(prey.speed), dt * 2.3);
+    pos.addScaledVector(prey.vel, dt);
+    limitToWorld(pos);
+    pos.y = terrainHeightAt(pos.x, pos.z) + prey.heightOffset;
+
+    if (playerDist < 11) {
+      const toPrey = pos.clone().sub(player.mesh.position);
+      const toward = toPrey.normalize().dot(player.forward);
+      if (toward > 0.28 && player.vel.lengthSq() > 1.2) {
+        const previous = ACTIVE_CHASE.get(prey.id) || -9999;
+        if (simTime - previous > 2.5) {
+          ACTIVE_CHASE.set(prey.id, simTime);
+          player.metrics.chaseAttempts += 1;
+        }
+      }
+    }
+
+    const catchDist = pos.distanceTo(player.mesh.position);
+    if (catchDist < 1.78 && player.vel.length() > prey.speed * 0.32) {
+      consumePrey(prey);
+    }
+
+    orientMeshToVelocity(prey.mesh, prey.vel, dt, 9);
+    animatePhenotype(prey.mesh, prey.vel.length() / Math.max(0.01, prey.speed), simTime, dt);
+  }
+}
+
+function updatePredators(dt) {
+  for (const pred of populations.predators) {
+    const pos = pred.mesh.position;
+    let target = null;
+    let targetDist = 9999;
+
+    for (const prey of populations.prey) {
+      if (!prey.alive) continue;
+      const d = prey.mesh.position.distanceTo(pos);
+      if (d < targetDist) {
+        targetDist = d;
+        target = prey.mesh.position;
+      }
+    }
+
+    const playerDist = player.mesh.position.distanceTo(pos);
+    if (playerDist < 14 && (targetDist > 12 || Math.random() < 0.5)) {
+      target = player.mesh.position;
+      targetDist = playerDist;
+    }
+
+    let desired;
+    if (target && targetDist < 36) {
+      desired = target.clone().sub(pos).normalize();
+    } else {
+      if (Math.random() < 0.012) pred.wander = randVec(1);
+      desired = pred.wander.clone().normalize();
+    }
+
+    socialAlign.set(0, 0, 0);
+    socialCohesion.set(0, 0, 0);
+    socialSeparation.set(0, 0, 0);
+    let packNeighbors = 0;
+    const packRadiusSq = BALANCE.social.predatorPackRadius * BALANCE.social.predatorPackRadius;
+    const predatorSeparationSq =
+      BALANCE.social.predatorSeparationRadius * BALANCE.social.predatorSeparationRadius;
+
+    for (const other of populations.predators) {
+      if (other === pred) continue;
+      const d2 = socialTemp.copy(other.mesh.position).sub(pos).lengthSq();
+      if (d2 > packRadiusSq || d2 < 0.0001) continue;
+
+      packNeighbors += 1;
+      socialAlign.add(other.vel);
+      socialCohesion.add(other.mesh.position);
+
+      if (d2 < predatorSeparationSq) {
+        const invDist = 1 / Math.sqrt(d2 + 0.0001);
+        socialSeparation.addScaledVector(socialTemp, -invDist);
+      }
+    }
+
+    if (packNeighbors > 0) {
+      const chaseBoost = target && targetDist < 36 ? BALANCE.social.predatorPackChaseBoost : 0;
+      const packWeight = pred.pack + chaseBoost;
+
+      socialAlign.divideScalar(packNeighbors);
+      if (socialAlign.lengthSq() > 0.0001) {
+        socialAlign
+          .normalize()
+          .multiplyScalar(BALANCE.social.predatorAlignmentWeight * packWeight);
+        desired.add(socialAlign);
+      }
+
+      socialCohesion.divideScalar(packNeighbors).sub(pos);
+      if (socialCohesion.lengthSq() > 0.0001) {
+        socialCohesion
+          .normalize()
+          .multiplyScalar(BALANCE.social.predatorCohesionWeight * packWeight);
+        desired.add(socialCohesion);
+      }
+
+      if (socialSeparation.lengthSq() > 0.0001) {
+        socialSeparation
+          .normalize()
+          .multiplyScalar(BALANCE.social.predatorSeparationWeight * (0.8 + packWeight * 0.4));
+        desired.add(socialSeparation);
+      }
+    }
+
+    if (desired.lengthSq() > 0.0001) desired.normalize();
+
+    pred.vel.lerp(desired.multiplyScalar(pred.speed), dt * 2.2);
+    pos.addScaledVector(pred.vel, dt);
+    limitToWorld(pos);
+    pos.y = terrainHeightAt(pos.x, pos.z) + pred.heightOffset;
+
+    for (const prey of populations.prey) {
+      if (!prey.alive) continue;
+      if (prey.mesh.position.distanceTo(pos) < 1.5) {
+        prey.alive = false;
+        prey.respawn = rand(8, 14);
+        prey.mesh.visible = false;
+      }
+    }
+
+    const dPlayer = player.mesh.position.distanceTo(pos);
+    if (dPlayer < 11) {
+      const previous = ACTIVE_THREATS.get(pred.id);
+      if (previous === undefined) {
+        ACTIVE_THREATS.set(pred.id, simTime);
+        player.metrics.threatEvents += 1;
+      }
+    } else {
+      const started = ACTIVE_THREATS.get(pred.id);
+      if (started !== undefined && simTime - started > 2.0) {
+        ACTIVE_THREATS.delete(pred.id);
+        player.metrics.threatEscapes += 1;
+      }
+    }
+
+    if (dPlayer < 2.15) {
+      damagePlayer(BALANCE.player.predatorContactDamage * dt);
+      const push = threatProbe.copy(player.mesh.position).sub(pos).normalize();
+      player.pos.addScaledVector(push, dt * BALANCE.player.predatorKnockback);
+      limitToWorld(player.pos);
+    }
+
+    orientMeshToVelocity(pred.mesh, pred.vel, dt, 8.4);
+    animatePhenotype(pred.mesh, pred.vel.length() / Math.max(0.01, pred.speed), simTime, dt);
+  }
+}
+
+function updateMatesAndRivals(dt) {
+  const tone = toneProfile();
+  if (!canReproduce()) {
+    clearGroup(populations.mates);
+    clearGroup(populations.rivals);
+    updateMateLockVisual(null);
+    return;
+  }
+
+  if (populations.mates.length === 0) {
+    spawnMateCluster();
+  }
+
+  const state = nearestMateState();
+
+  for (const mate of populations.mates) {
+    if (mate.captured) continue;
+    mate.pulse += dt * 2.4;
+    const eligible = requirementMet(mate.requirement);
+    const isNearestEligible = !!state.nearestEligible && state.nearestEligible.id === mate.id;
+    const isNearestAny = !!state.nearestAny && state.nearestAny.id === mate.id;
+
+    mate.mesh.scale.setScalar(1 + Math.sin(mate.pulse) * (isNearestAny ? 0.11 : 0.07));
+    let tint = eligible ? 0x9cd8ff : 0x5f6f80;
+    if (isNearestEligible) tint = 0xb3ff78;
+    mate.mesh.material.color.setHex(tint);
+    setPhenotypeTint(mate.mesh, tint);
+
+    if (player.mesh.position.distanceTo(mate.mesh.position) < 7.2) {
+      player.metrics.socialExposure += dt * tone.socialExposureMult;
+    }
+
+    if (mate.marker) {
+      const ringColor = eligible ? (isNearestEligible ? 0xc6ff87 : 0x95dcff) : 0x728496;
+      mate.marker.ringMaterial.color.setHex(ringColor);
+      mate.marker.beamMaterial.color.setHex(ringColor);
+      mate.marker.tipMaterial.color.setHex(eligible ? 0xf0ffe6 : 0xc5cfd8);
+      mate.marker.beam.scale.y = isNearestAny ? 1.25 : 1;
+      mate.marker.tip.position.y = 2.08 + Math.sin(mate.pulse * 1.8) * 0.08;
+      mate.marker.tag.position.y = 2.65 + Math.sin(mate.pulse * 1.7) * 0.05;
+      mate.marker.tag.material.opacity = isNearestAny ? 1 : 0.9;
+      const tagScale = isNearestAny ? 1.12 : 1;
+      mate.marker.tag.scale.set(1.55 * tagScale, 0.78 * tagScale, 1);
+      mate.marker.group.rotation.y += dt * 0.7;
+    }
+
+    animatePhenotype(mate.mesh, 0.12, simTime, dt);
+  }
+
+  for (const rival of populations.rivals) {
+    const mate = populations.mates[rival.targetIndex];
+    if (!mate || mate.captured) continue;
+    const toMate = mate.mesh.position.clone().sub(rival.mesh.position);
+    const d = toMate.length();
+    if (d > 0.2) {
+      rival.mesh.position.addScaledVector(toMate.normalize(), rival.speed * dt);
+      limitToWorld(rival.mesh.position);
+      rival.mesh.position.y =
+        terrainHeightAt(rival.mesh.position.x, rival.mesh.position.z) + rival.heightOffset;
+    }
+    if (d < 2.0) {
+      rival.claimTimer += dt;
+      if (rival.claimTimer > 3.4 * tone.rivalClaimScale) {
+        mate.captured = true;
+        scene.remove(mate.mesh);
+        disposeMeshTree(mate.mesh);
+      }
+    } else {
+      rival.claimTimer = 0;
+    }
+
+    orientMeshToVelocity(rival.mesh, toMate, dt, 10);
+    const rivalSpeedNorm = d > 0.2 ? 0.68 : 0.16;
+    if (rival.marker) {
+      rival.marker.cone.rotation.y += dt * 2.8;
+      rival.marker.warnMaterial.color.setHex(d < 3.2 ? 0xff6d55 : 0xffb56e);
+      rival.marker.tag.position.y = 2.25 + Math.sin(simTime * 2.4 + rival.id) * 0.04;
+    }
+    animatePhenotype(rival.mesh, rivalSpeedNorm, simTime, dt);
+  }
+
+  populations.mates = populations.mates.filter((m) => !m.captured);
+
+  if (populations.mates.length === 0) {
+    clearGroup(populations.rivals);
+    player.reproductionCooldown = BALANCE.player.reproductionCooldownAfterFail;
+    updateMateLockVisual(null);
+    return;
+  }
+
+  updateMateLockVisual(nearestMateState());
+}
+
+function updatePlayer(dt) {
+  const tone = toneProfile();
+  player.age += dt;
+  player.reproductionCooldown = Math.max(0, player.reproductionCooldown - dt);
+
+  const forward = moveForward.copy(player.pos).sub(camera.position);
+  forward.y = 0;
+  if (forward.lengthSq() < 0.0001) {
+    forward.set(-Math.sin(camYaw), 0, -Math.cos(camYaw));
+  } else {
+    forward.normalize();
+  }
+
+  const right = moveRight.crossVectors(forward, worldUp);
+  if (right.lengthSq() < 0.0001) {
+    right.set(1, 0, 0);
+  } else {
+    right.normalize();
+  }
+  const input = new THREE.Vector3();
+
+  if (KEY.KeyW) input.add(forward);
+  if (KEY.KeyS) input.sub(forward);
+  if (KEY.KeyA) input.sub(right);
+  if (KEY.KeyD) input.add(right);
+
+  if (input.lengthSq() > 0.001) {
+    input.normalize();
+    player.forward.lerp(input, dt * 8);
+    player.metrics.activeTime += dt;
+  }
+
+  const moveSpd = movementSpeed();
+  const targetVel = input.multiplyScalar(moveSpd);
+  player.vel.lerp(targetVel, dt * 7.5);
+  const moveDelta = player.vel.clone().multiplyScalar(dt);
+  player.pos.add(moveDelta);
+  limitToWorld(player.pos);
+  player.pos.y = terrainHeightAt(player.pos.x, player.pos.z) + PLAYER_HEIGHT_OFFSET;
+  player.metrics.distance += moveDelta.length();
+
+  const biome = biomeAt(player.pos);
+  let energyDrain =
+    (BALANCE.player.energyDrainBase + moveDelta.length() * BALANCE.player.energyDrainMoveScale) *
+    dt;
+
+  if (biome === BIOMES.scorch.id) {
+    player.metrics.heatExposure += dt;
+    energyDrain += (1 - player.traits.heat) * WORLD.hazardScale * BALANCE.player.scorchDrainScale * dt;
+  } else if (biome === BIOMES.wetland.id) {
+    player.metrics.waterExposure += dt;
+    energyDrain += (1 - player.traits.swim) * WORLD.hazardScale * BALANCE.player.wetlandDrainScale * dt;
+  }
+  energyDrain *= tone.energyDrainMult;
+
+  player.energy = clamp(player.energy - energyDrain, 0, maxEnergy());
+
+  if (player.energy < maxEnergy() * BALANCE.player.lowEnergyRatio) {
+    damagePlayer(
+      (BALANCE.player.lowEnergyDamageBase +
+        WORLD.hazardScale * BALANCE.player.lowEnergyDamageHazardScale) *
+        dt *
+        tone.damageMult
+    );
+  } else {
+    player.health = clamp(player.health + BALANCE.player.passiveHealthRegen * tone.regenMult * dt, 0, 100);
+  }
+
+  player.mesh.position.copy(player.pos);
+  player.mesh.rotation.y = Math.atan2(player.forward.x, player.forward.z);
+  if (player.marker) {
+    player.marker.ring.rotation.z += dt * 0.65;
+    player.marker.beacon.position.y = 1.86 + Math.sin(simTime * 2.2) * 0.08;
+  }
+  animatePhenotype(player.mesh, player.vel.length() / Math.max(0.01, moveSpd), simTime, dt);
+}
+
+function evolveTraits(mateMods) {
+  const tone = toneProfile();
+  const m = player.metrics;
+  const age = Math.max(player.age, 1);
+  const totalFood = m.plants + m.prey;
+  const plantRatio = totalFood > 0 ? m.plants / totalFood : player.traits.herbivore;
+  const preyRatio = totalFood > 0 ? m.prey / totalFood : player.traits.carnivore;
+  const chaseRate = m.chaseAttempts > 0 ? m.chaseSuccess / m.chaseAttempts : 0;
+  const evadeRate = m.threatEvents > 0 ? m.threatEscapes / m.threatEvents : 0.45;
+  const activeRatio = clamp(m.activeTime / age, 0, 1);
+  const heatRatio = clamp(m.heatExposure / age, 0, 1);
+  const waterRatio = clamp(m.waterExposure / age, 0, 1);
+  const socialRatio = clamp(m.socialExposure / age, 0, 1);
+
+  const target = {
+    speed: clamp(0.2 + chaseRate * 0.5 + evadeRate * 0.18, 0, 1),
+    stamina: clamp(0.2 + activeRatio * 0.62, 0, 1),
+    herbivore: clamp(plantRatio, 0, 1),
+    carnivore: clamp(preyRatio, 0, 1),
+    swim: clamp(waterRatio, 0, 1),
+    heat: clamp(heatRatio, 0, 1),
+    social: clamp(socialRatio, 0, 1),
+  };
+
+  const next = {};
+  const targetWeight = clamp(
+    BALANCE.evolution.targetWeight * tone.targetWeightScale,
+    0.18,
+    0.45
+  );
+  for (const key of TRAIT_KEYS) {
+    const mutation =
+      rand(BALANCE.evolution.mutationMin, BALANCE.evolution.mutationMax) *
+      tone.mutationScale;
+    const v =
+      player.traits[key] * BALANCE.evolution.parentWeight +
+      target[key] * targetWeight +
+      (mateMods[key] || 0) +
+      mutation;
+    next[key] = clamp(v, 0, 1);
+  }
+
+  const dietSum = next.herbivore + next.carnivore;
+  if (dietSum > BALANCE.evolution.dietCap) {
+    next.herbivore /= dietSum / BALANCE.evolution.dietCap;
+    next.carnivore /= dietSum / BALANCE.evolution.dietCap;
+  }
+  return next;
+}
+
+function nextGeneration(mate) {
+  telemetry.births += 1;
+  const entry = {
+    generation: player.generation,
+    age: Number(player.age.toFixed(1)),
+    food: { plants: player.metrics.plants, prey: player.metrics.prey },
+    traits: { ...player.traits },
+  };
+  player.lineage.push(entry);
+
+  player.traits = evolveTraits(mate.mods);
+  player.generation += 1;
+  resetPlayerMorphology(
+    player.generation * 911 + Math.floor(Math.random() * 9000) + 29
+  );
+  setWorldFromGeneration(player.generation);
+  rebuildBiomeVisuals();
+
+  initPlayerLifecycle(BALANCE.player.offspringStartEnergyRatio);
+  player.reproductionCooldown = BALANCE.player.reproductionCooldownAfterBirth;
+
+  clearGroup(populations.mates);
+  clearGroup(populations.rivals);
+  syncPopulation();
+  saveSnapshot("generation");
+}
+
+function tryReproduce() {
+  if (!canReproduce()) {
+    setActionMessage("Not reproduction-ready: build age/energy and stay healthy.");
+    return;
+  }
+
+  if (populations.mates.length === 0) {
+    spawnMateCluster();
+    setActionMessage("Mates signaled nearby. Move to one and press E again.");
+    return;
+  }
+
+  const state = nearestMateState();
+
+  if (
+    state.nearestEligible &&
+    state.nearestEligibleDist <= BALANCE.player.reproductionInteractDistance
+  ) {
+    nextGeneration(state.nearestEligible);
+    setActionMessage("Reproduction success: next generation begins.", 3.1);
+    return;
+  }
+
+  if (state.nearestEligible) {
+    setActionMessage(
+      `Mate #${state.nearestEligible.slot} eligible at ${state.nearestEligibleDist.toFixed(
+        1
+      )}m (need <= ${BALANCE.player.reproductionInteractDistance.toFixed(
+        1
+      )}m).`
+    );
+    return;
+  }
+
+  if (state.nearestAny) {
+    setActionMessage(
+      `Mate #${state.nearestAny.slot} is locked (${requirementText(state.nearestAny.requirement)}).`
+    );
+    return;
+  }
+
+  setActionMessage("No mates available yet.");
+}
+
+function tryDeathReset() {
+  if (player.health > 0) return;
+  telemetry.deaths += 1;
+  player.generation = Math.max(1, player.generation - 1);
+  setWorldFromGeneration(player.generation);
+  resetPlayerMorphology(
+    player.generation * 911 + Math.floor(Math.random() * 8000) + 53
+  );
+  initPlayerLifecycle(BALANCE.player.deathResetEnergyRatio);
+  clearGroup(populations.mates);
+  clearGroup(populations.rivals);
+  rebuildBiomeVisuals();
+  saveSnapshot("death-reset");
+}
+
+function hudText() {
+  const tone = toneProfile();
+  const energy = player.energy.toFixed(1);
+  const energyMax = maxEnergy().toFixed(0);
+  const ready = canReproduce() ? "ready" : "not ready";
+  const biome = biomeAt(player.pos);
+  const lineageLen = player.lineage.length;
+
+  ui.lineage.textContent =
+    `Generation ${player.generation} | Lineage entries ${lineageLen} | World tier ${WORLD.tier}`;
+  ui.status.textContent =
+    `Energy ${energy}/${energyMax} | Health ${player.health.toFixed(0)} | Age ${player.age.toFixed(
+      0
+    )} | Biome ${biome} | Reproduction ${ready} | Tone ${tone.label}`;
+  if (ui.repro) {
+    let reproLine = "Reproduction: not ready yet.";
+    if (canReproduce()) {
+      const state = nearestMateState();
+      if (state.nearestEligible) {
+        reproLine = `Reproduction: Mate #${state.nearestEligible.slot} eligible (${state.nearestEligibleDist.toFixed(
+          1
+        )}m)`;
+      } else if (state.nearestAny) {
+        reproLine = `Reproduction: Mate #${state.nearestAny.slot} locked (${requirementText(
+          state.nearestAny.requirement
+        )})`;
+      } else {
+        reproLine = "Reproduction: searching for mates...";
+      }
+    }
+    ui.repro.textContent =
+      actionMessageTimer > 0 && actionMessage
+        ? `${reproLine} | ${actionMessage}`
+        : reproLine;
+  }
+
+  if (ui.target) {
+    let targetLine = "Mate lock: unavailable (become reproduction-ready first).";
+    if (canReproduce()) {
+      const state = nearestMateState();
+      if (state.nearestEligible) {
+        const inRange = state.nearestEligibleDist <= BALANCE.player.reproductionInteractDistance;
+        targetLine = inRange
+          ? `Mate lock: M${state.nearestEligible.slot} IN RANGE (${state.nearestEligibleDist.toFixed(1)}m) -> press E`
+          : `Mate lock: M${state.nearestEligible.slot} eligible (${state.nearestEligibleDist.toFixed(1)}m)`;
+      } else if (state.nearestAny) {
+        targetLine = `Mate lock: M${state.nearestAny.slot} locked (${requirementText(state.nearestAny.requirement)})`;
+      } else {
+        targetLine = "Mate lock: scanning for mates...";
+      }
+    }
+    ui.target.textContent = targetLine;
+  }
+
+  ui.traits.textContent =
+    `Traits  speed ${player.traits.speed.toFixed(2)}  stamina ${player.traits.stamina.toFixed(
+      2
+    )}  herb ${player.traits.herbivore.toFixed(2)}  carn ${player.traits.carnivore.toFixed(
+      2
+    )}  swim ${player.traits.swim.toFixed(2)}  heat ${player.traits.heat.toFixed(
+      2
+    )}  body ${player.morphLabel}`;
+
+  if (!ui.save) return;
+  if (!storageSupported()) {
+    ui.save.textContent = "Save unavailable in this browser context";
+    return;
+  }
+  if (saveState.error) {
+    ui.save.textContent = `Save status: ${saveState.error}`;
+    return;
+  }
+  if (saveState.lastSavedAt > 0) {
+    const secondsAgo = Math.max(0, Math.floor((Date.now() - saveState.lastSavedAt) / 1000));
+    ui.save.textContent = `Save status: ${saveState.lastReason} (${secondsAgo}s ago)`;
+    return;
+  }
+  ui.save.textContent = saveState.loadedFromDisk
+    ? "Save status: loaded snapshot"
+    : "Save status: fresh lineage";
+
+  if (ui.telemetry) {
+    if (!telemetry.enabled) {
+      ui.telemetry.textContent = "Telemetry: hidden (press T)";
+    } else {
+      ui.telemetry.textContent =
+        `Telemetry fps ${telemetry.fps.toFixed(0)} | pop f:${populations.flora.length} p:${populations.prey.length} c:${populations.predators.length}` +
+        ` | lineage +${telemetry.births} / -${telemetry.deaths} | tone ${tone.label} | biome ${biome}`;
+    }
+  }
+
+  if (ui.hint) {
+    ui.hint.textContent =
+      "Move: WASD | Focus: F | Map: G | Reproduce: E | Tone: M | Telemetry: T | Save: K | Load: L | New: N | Debug: Tab | Pan: Shift+Drag | Mate markers: M1/M2 cyan-green | Rival markers: R1/R2 orange | Mate lock beam: active when reproduction-ready";
+  }
+}
+
+let debugShown = false;
+function debugText() {
+  if (!debugShown) return;
+  const tone = toneProfile();
+  const m = player.metrics;
+  const matesInfo = populations.mates
+    .map((mate, idx) => {
+      const met = requirementMet(mate.requirement) ? "ok" : "locked";
+      return `Mate ${idx + 1}: ${met} req=${mate.requirement.type}:${mate.requirement.min}`;
+    })
+    .join("\n");
+
+  ui.debug.textContent = [
+    `tone=${tone.id}(${tone.label})`,
+    `flora=${populations.flora.length} prey=${populations.prey.length} predators=${populations.predators.length}`,
+    `plants=${m.plants} prey=${m.prey} chase=${m.chaseSuccess}/${m.chaseAttempts}`,
+    `threatEscapes=${m.threatEscapes}/${m.threatEvents}`,
+    `body="${player.morphLabel}" morphDelta=${traitDistance(player.morphTraits, player.renderedMorphTraits).toFixed(3)}`,
+    `heat=${m.heatExposure.toFixed(1)} water=${m.waterExposure.toFixed(1)} social=${m.socialExposure.toFixed(1)}`,
+    matesInfo,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+let camYaw = 0.2;
+let camPitch = 0.42;
+let camDist = 18;
+const camPan = new THREE.Vector3(0, 0, 0);
+let drag = false;
+let dragPan = false;
+let lastMouseX = 0;
+let lastMouseY = 0;
+
+const panRight = new THREE.Vector3();
+const panForward = new THREE.Vector3();
+
+function clampCamPan() {
+  const maxPan = WORLD.radius * 0.72;
+  camPan.x = clamp(camPan.x, -maxPan, maxPan);
+  camPan.z = clamp(camPan.z, -maxPan, maxPan);
+}
+
+function applyPanDelta(dx, dy, scale) {
+  const panScale = (scale || 0.0026) * camDist;
+
+  panRight.setFromMatrixColumn(camera.matrixWorld, 0);
+  panRight.y = 0;
+  if (panRight.lengthSq() < 0.0001) {
+    panRight.set(1, 0, 0);
+  } else {
+    panRight.normalize();
+  }
+
+  panForward.copy(player.mesh.position).sub(camera.position);
+  panForward.y = 0;
+  if (panForward.lengthSq() < 0.0001) {
+    panForward.set(-Math.sin(camYaw), 0, -Math.cos(camYaw));
+  } else {
+    panForward.normalize();
+  }
+
+  camPan.addScaledVector(panRight, -dx * panScale);
+  camPan.addScaledVector(panForward, dy * panScale);
+  clampCamPan();
+}
+
+renderer.domElement.addEventListener("contextmenu", (e) => {
+  e.preventDefault();
+});
+
+renderer.domElement.addEventListener("mousedown", (e) => {
+  if (e.button !== 0 && e.button !== 1 && e.button !== 2) return;
+  drag = true;
+  dragPan = e.shiftKey || e.button === 1 || e.button === 2;
+  lastMouseX = e.clientX;
+  lastMouseY = e.clientY;
+});
+
+window.addEventListener("mouseup", () => {
+  drag = false;
+  dragPan = false;
+});
+
+window.addEventListener("mousemove", (e) => {
+  if (!drag) return;
+  const dx = e.clientX - lastMouseX;
+  const dy = e.clientY - lastMouseY;
+  lastMouseX = e.clientX;
+  lastMouseY = e.clientY;
+  if (dragPan) {
+    applyPanDelta(dx, dy, 0.0028);
+  } else {
+    camYaw -= dx * 0.0056;
+    camPitch = clamp(camPitch - dy * 0.0048, 0.12, 1.16);
+  }
+});
+
+renderer.domElement.addEventListener(
+  "wheel",
+  (e) => {
+    if (e.cancelable) e.preventDefault();
+    const zoomScale = e.ctrlKey ? 0.008 : 0.02;
+    camDist = clamp(camDist + e.deltaY * zoomScale, 10, 34);
+  },
+  { passive: false }
+);
+
+let touchMode = "none";
+let touchLastX = 0;
+let touchLastY = 0;
+let touchLastDist = 0;
+let touchLastCenterX = 0;
+let touchLastCenterY = 0;
+
+function touchCenter(touches, count) {
+  const use = Math.min(count, touches.length);
+  let x = 0;
+  let y = 0;
+  for (let i = 0; i < use; i += 1) {
+    x += touches[i].clientX;
+    y += touches[i].clientY;
+  }
+  return { x: x / use, y: y / use };
+}
+
+function touchDistance(a, b) {
+  const dx = a.clientX - b.clientX;
+  const dy = a.clientY - b.clientY;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function resetTouchMode(touches) {
+  if (!touches || touches.length === 0) {
+    touchMode = "none";
+    return;
+  }
+  if (touches.length === 1) {
+    touchMode = "orbit";
+    touchLastX = touches[0].clientX;
+    touchLastY = touches[0].clientY;
+    return;
+  }
+  if (touches.length === 2) {
+    touchMode = "pinch";
+    touchLastDist = touchDistance(touches[0], touches[1]);
+    const center = touchCenter(touches, 2);
+    touchLastCenterX = center.x;
+    touchLastCenterY = center.y;
+    return;
+  }
+  touchMode = "tri-pan";
+  const center = touchCenter(touches, 3);
+  touchLastCenterX = center.x;
+  touchLastCenterY = center.y;
+}
+
+renderer.domElement.addEventListener(
+  "touchstart",
+  (e) => {
+    if (e.cancelable) e.preventDefault();
+    resetTouchMode(e.touches);
+  },
+  { passive: false }
+);
+
+renderer.domElement.addEventListener(
+  "touchmove",
+  (e) => {
+    if (e.cancelable) e.preventDefault();
+    if (touchMode === "orbit" && e.touches.length === 1) {
+      const x = e.touches[0].clientX;
+      const y = e.touches[0].clientY;
+      const dx = x - touchLastX;
+      const dy = y - touchLastY;
+      touchLastX = x;
+      touchLastY = y;
+      camYaw -= dx * 0.006;
+      camPitch = clamp(camPitch - dy * 0.0052, 0.12, 1.16);
+      return;
+    }
+
+    if (touchMode === "pinch" && e.touches.length >= 2) {
+      const nextDist = touchDistance(e.touches[0], e.touches[1]);
+      const dDist = nextDist - touchLastDist;
+      touchLastDist = nextDist;
+      camDist = clamp(camDist - dDist * 0.028, 10, 34);
+
+      const center = touchCenter(e.touches, 2);
+      const dx = center.x - touchLastCenterX;
+      const dy = center.y - touchLastCenterY;
+      touchLastCenterX = center.x;
+      touchLastCenterY = center.y;
+      applyPanDelta(dx, dy, 0.0019);
+      return;
+    }
+
+    if (touchMode === "tri-pan" && e.touches.length >= 3) {
+      const center = touchCenter(e.touches, 3);
+      const dx = center.x - touchLastCenterX;
+      const dy = center.y - touchLastCenterY;
+      touchLastCenterX = center.x;
+      touchLastCenterY = center.y;
+
+      // Three-finger gesture blends orbit and pan for broader camera control.
+      camYaw -= dx * 0.0032;
+      camPitch = clamp(camPitch - dy * 0.0024, 0.12, 1.16);
+      applyPanDelta(dx * 0.45, dy * 0.45, 0.0022);
+      return;
+    }
+
+    resetTouchMode(e.touches);
+  },
+  { passive: false }
+);
+
+renderer.domElement.addEventListener(
+  "touchend",
+  (e) => {
+    resetTouchMode(e.touches);
+  },
+  { passive: false }
+);
+
+renderer.domElement.addEventListener(
+  "touchcancel",
+  () => {
+    touchMode = "none";
+  },
+  { passive: false }
+);
+
+window.addEventListener("keydown", (e) => {
+  KEY[e.code] = true;
+  if (e.code === "KeyE") tryReproduce();
+  if (e.code === "KeyF") focusPlayerCamera(false);
+  if (e.code === "KeyG") {
+    mapState.enabled = !mapState.enabled;
+    setActionMessage(`Map ${mapState.enabled ? "shown" : "hidden"}.`, 1.6);
+  }
+  if (e.code === "KeyM") cycleToneProfile();
+  if (e.code === "KeyT") {
+    telemetry.enabled = !telemetry.enabled;
+    setActionMessage(`Telemetry ${telemetry.enabled ? "enabled" : "hidden"}.`, 1.8);
+  }
+  if (e.code === "KeyK") saveSnapshot("manual-save");
+  if (e.code === "KeyL") loadSnapshot();
+  if (e.code === "KeyN") {
+    newLineage(true);
+    saveSnapshot("new-lineage");
+  }
+  if (e.code === "Tab") {
+    e.preventDefault();
+    debugShown = !debugShown;
+    ui.debug.classList.toggle("hidden", !debugShown);
+  }
+});
+
+window.addEventListener("keyup", (e) => {
+  KEY[e.code] = false;
+});
+
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+const camTarget = new THREE.Vector3();
+const camPos = new THREE.Vector3();
+
+function updateCamera(dt) {
+  camTarget.copy(player.mesh.position).add(new THREE.Vector3(0, 2.5, 0)).add(camPan);
+  const cx = Math.sin(camYaw) * Math.cos(camPitch) * camDist;
+  const cy = Math.sin(camPitch) * camDist + 2.6;
+  const cz = Math.cos(camYaw) * Math.cos(camPitch) * camDist;
+  camPos.set(camTarget.x + cx, camTarget.y + cy, camTarget.z + cz);
+  camera.position.lerp(camPos, 1 - Math.exp(-dt * 8));
+  camera.lookAt(camTarget);
+}
+
+function drawMinimap() {
+  if (!ui.minimap || !minimapCtx || !ui.mapPanel) return;
+  if (!mapState.enabled) {
+    ui.mapPanel.classList.add("hidden");
+    return;
+  }
+  ui.mapPanel.classList.remove("hidden");
+
+  const ctx = minimapCtx;
+  const w = ui.minimap.width;
+  const h = ui.minimap.height;
+  const cx = w * 0.5;
+  const cy = h * 0.5;
+  const radius = Math.min(w, h) * 0.46;
+  const range = Math.max(58, Math.min(mapState.range, WORLD.radius + 18));
+  const scale = radius / range;
+
+  const toMapX = (x) => cx + (x - player.pos.x) * scale;
+  const toMapY = (z) => cy - (z - player.pos.z) * scale;
+
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = "rgba(8, 20, 16, 0.9)";
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.clip();
+
+  ctx.fillStyle = "rgba(23, 44, 35, 0.9)";
+  ctx.fillRect(0, 0, w, h);
+
+  if (WORLD.tier >= 2) {
+    ctx.fillStyle = "rgba(160, 114, 66, 0.44)";
+    ctx.beginPath();
+    ctx.arc(toMapX(SCORCH_CENTER.x), toMapY(SCORCH_CENTER.z), SCORCH_RADIUS * scale, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (WORLD.tier >= 3) {
+    ctx.fillStyle = "rgba(76, 132, 143, 0.44)";
+    ctx.beginPath();
+    ctx.arc(toMapX(WETLAND_CENTER.x), toMapY(WETLAND_CENTER.z), WETLAND_RADIUS * scale, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.strokeStyle = "rgba(232, 243, 235, 0.34)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(toMapX(0), toMapY(0), WORLD.radius * scale, 0, Math.PI * 2);
+  ctx.stroke();
+
+  const drawEntity = (x, z, r, color, alpha) => {
+    const mx = toMapX(x);
+    const my = toMapY(z);
+    if (mx < -4 || my < -4 || mx > w + 4 || my > h + 4) return;
+    ctx.globalAlpha = alpha === undefined ? 1 : alpha;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(mx, my, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  };
+
+  for (let i = 0; i < populations.flora.length; i += 3) {
+    const f = populations.flora[i];
+    if (!f || !f.alive) continue;
+    drawEntity(f.mesh.position.x, f.mesh.position.z, 1.4, "#2d7f46", 0.78);
+  }
+
+  for (const prey of populations.prey) {
+    if (!prey.alive) continue;
+    drawEntity(prey.mesh.position.x, prey.mesh.position.z, 1.8, "#8ed472", 0.92);
+  }
+
+  for (const pred of populations.predators) {
+    drawEntity(pred.mesh.position.x, pred.mesh.position.z, 2.15, "#dc725f", 0.94);
+  }
+
+  const mateState = nearestMateState();
+  for (const mate of populations.mates) {
+    if (mate.captured) continue;
+    const eligible = requirementMet(mate.requirement);
+    const isNearestEligible = mateState.nearestEligible && mateState.nearestEligible.id === mate.id;
+    const color = isNearestEligible ? "#beff80" : eligible ? "#87d8ff" : "#6f7f8d";
+    drawEntity(mate.mesh.position.x, mate.mesh.position.z, isNearestEligible ? 3.1 : 2.5, color, 0.98);
+  }
+
+  for (const rival of populations.rivals) {
+    drawEntity(rival.mesh.position.x, rival.mesh.position.z, 2.3, "#ffb56e", 0.95);
+  }
+
+  ctx.restore();
+
+  ctx.strokeStyle = "rgba(222, 236, 227, 0.7)";
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Player always centered in this radar map.
+  ctx.fillStyle = "#f8fff8";
+  ctx.beginPath();
+  ctx.arc(cx, cy, 3.2, 0, Math.PI * 2);
+  ctx.fill();
+
+  const hx = player.forward.x;
+  const hz = player.forward.z;
+  const mag = Math.sqrt(hx * hx + hz * hz) || 1;
+  const ux = hx / mag;
+  const uz = hz / mag;
+  const tipX = cx + ux * 9;
+  const tipY = cy - uz * 9;
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(tipX, tipY);
+  ctx.stroke();
+
+  if (ui.mapLegend) {
+    ui.mapLegend.textContent = `Map: G | Radius ${range.toFixed(0)}m | White=You | Green/Cyan=Mates | Orange=Rivals`;
+  }
+}
+
+setWorldFromGeneration(player.generation);
+syncPopulation();
+rebuildBiomeVisuals();
+if (!loadSnapshot()) {
+  newLineage(false);
+}
+focusPlayerCamera(true);
+
+let simTime = 0;
+let autosaveTimer = 0;
+const clock = new THREE.Clock();
+
+function frame() {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  simTime += dt;
+  autosaveTimer += dt;
+  telemetry.sampleFrames += 1;
+  telemetry.sampleTime += dt;
+  if (telemetry.sampleTime >= 0.5) {
+    telemetry.fps = telemetry.sampleFrames / telemetry.sampleTime;
+    telemetry.sampleFrames = 0;
+    telemetry.sampleTime = 0;
+  }
+  if (actionMessageTimer > 0) {
+    actionMessageTimer -= dt;
+    if (actionMessageTimer <= 0) actionMessage = "";
+  }
+
+  updatePlayer(dt);
+  updateFlora(dt);
+  updatePrey(dt);
+  updatePredators(dt);
+  updateMatesAndRivals(dt);
+  updatePlayerMorphology(dt);
+  tryDeathReset();
+  syncPopulation();
+
+  updateCamera(dt);
+  hudText();
+  debugText();
+  drawMinimap();
+
+  if (autosaveTimer >= BALANCE.save.autosaveSeconds) {
+    autosaveTimer = 0;
+    saveSnapshot("autosave");
+  }
+
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+
+frame();

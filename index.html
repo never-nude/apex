@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Apex Prototype</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div id="hud" class="panel">
+      <div id="lineage" class="line"></div>
+      <div id="status" class="line"></div>
+      <div id="repro" class="line small"></div>
+      <div id="target" class="line small"></div>
+      <div id="traits" class="line small"></div>
+      <div id="save" class="line small"></div>
+      <div id="telemetry" class="line small"></div>
+      <div id="hint" class="line small">Move: WASD | Focus: F | Map: G | Reproduce: E | Tone: M | Telemetry: T | Save: K | Load: L | New: N | Debug: Tab | Pan: Shift+Drag | Mate markers: M1/M2 | Rival markers: R1/R2 | Mate lock beam when ready</div>
+    </div>
+    <div id="mapPanel" class="panel map">
+      <canvas id="minimap" width="220" height="220"></canvas>
+      <div id="mapLegend" class="line small">Map: G | White=You | M1/M2=mates | R1/R2=rivals</div>
+    </div>
+    <div id="debug" class="panel hidden"></div>
+    <div id="bootError" class="panel error hidden"></div>
+    <script type="module">
+      const bootError = document.getElementById("bootError");
+      const showError = (message) => {
+        bootError.textContent = message;
+        bootError.classList.remove("hidden");
+      };
+
+      import("./vendor/three.module.min.js")
+        .then((threeNs) => {
+          window.THREE = threeNs;
+          const script = document.createElement("script");
+          script.src = "./main.js";
+          script.onerror = () => showError("Failed to load Apex runtime script.");
+          document.body.appendChild(script);
+        })
+        .catch(() => {
+          showError("Failed to load Three.js engine module from local vendor bundle.");
+        });
+    </script>
+  </body>
+</html>
