@@ -24,7 +24,8 @@ Open: `http://127.0.0.1:8158`
 
 ## Controls
 
-- `W A S D`: Move
+- `W A S D`: Camera-relative movement
+- `Arrow keys`: Steering controls (`Up/Down` throttle, `Left/Right` turn)
 - `F`: Focus camera on player organism
 - `G`: Toggle minimap/radar
 - Mouse drag: Orbit camera

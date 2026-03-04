@@ -21,6 +21,8 @@ const BALANCE = {
     maxEnergyFromStamina: 70,
     moveSpeedBase: 4.2,
     moveSpeedFromTrait: 9.2,
+    steerTurnRate: 2.7,
+    steerReverseScale: 0.72,
     reproductionAgeMin: 52,
     reproductionEnergyRatio: 0.72,
     reproductionHealthMin: 35,
@@ -2070,12 +2072,34 @@ function updatePlayer(dt) {
   } else {
     right.normalize();
   }
-  const input = new THREE.Vector3();
 
-  if (KEY.KeyW) input.add(forward);
-  if (KEY.KeyS) input.sub(forward);
-  if (KEY.KeyA) input.sub(right);
-  if (KEY.KeyD) input.add(right);
+  const steerTurn =
+    (KEY.ArrowRight ? 1 : 0) - (KEY.ArrowLeft ? 1 : 0);
+  if (steerTurn !== 0) {
+    const yaw = steerTurn * BALANCE.player.steerTurnRate * dt;
+    const cosYaw = Math.cos(yaw);
+    const sinYaw = Math.sin(yaw);
+    const fx = player.forward.x;
+    const fz = player.forward.z;
+    player.forward.x = fx * cosYaw + fz * sinYaw;
+    player.forward.z = fz * cosYaw - fx * sinYaw;
+    player.forward.normalize();
+  }
+
+  const input = new THREE.Vector3();
+  const cameraInput = new THREE.Vector3();
+
+  if (KEY.KeyW) cameraInput.add(forward);
+  if (KEY.KeyS) cameraInput.sub(forward);
+  if (KEY.KeyA) cameraInput.sub(right);
+  if (KEY.KeyD) cameraInput.add(right);
+  if (cameraInput.lengthSq() > 0.001) input.add(cameraInput.normalize());
+
+  const steerThrottle = (KEY.ArrowUp ? 1 : 0) - (KEY.ArrowDown ? 1 : 0);
+  if (steerThrottle !== 0) {
+    const throttleScale = steerThrottle > 0 ? 1 : BALANCE.player.steerReverseScale;
+    input.addScaledVector(player.forward, steerThrottle * throttleScale);
+  }
 
   if (input.lengthSq() > 0.001) {
     input.normalize();
@@ -2357,7 +2381,7 @@ function hudText() {
 
   if (ui.hint) {
     ui.hint.textContent =
-      "Move: WASD | Focus: F | Map: G | Reproduce: E | Tone: M | Telemetry: T | Save: K | Load: L | New: N | Debug: Tab | Pan: Shift+Drag | Mate markers: M1/M2 cyan-green | Rival markers: R1/R2 orange | Mate lock beam: active when reproduction-ready";
+      "Move: WASD + Arrow steer (Up/Down throttle, Left/Right turn) | Focus: F | Map: G | Reproduce: E | Tone: M | Telemetry: T | Save: K | Load: L | New: N | Debug: Tab | Pan: Shift+Drag | Mate markers: M1/M2 cyan-green | Rival markers: R1/R2 orange | Mate lock beam: active when reproduction-ready";
   }
 }
 
@@ -2594,6 +2618,9 @@ renderer.domElement.addEventListener(
 );
 
 window.addEventListener("keydown", (e) => {
+  if (e.code.startsWith("Arrow")) {
+    e.preventDefault();
+  }
   KEY[e.code] = true;
   if (e.code === "KeyE") tryReproduce();
   if (e.code === "KeyF") focusPlayerCamera(false);
