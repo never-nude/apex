@@ -115,6 +115,15 @@ const DEFAULT_TRAITS = Object.freeze({
   social: 0.2,
 });
 const TRAIT_KEYS = Object.keys(DEFAULT_TRAITS);
+const TRAIT_SHORT = Object.freeze({
+  speed: "spd",
+  stamina: "stam",
+  herbivore: "herb",
+  carnivore: "carn",
+  swim: "swim",
+  heat: "heat",
+  social: "social",
+});
 
 const TONE_PROFILES = Object.freeze([
   {
@@ -193,6 +202,7 @@ const ui = {
   status: document.getElementById("status"),
   repro: document.getElementById("repro"),
   target: document.getElementById("target"),
+  mateInfo: document.getElementById("mateInfo"),
   traits: document.getElementById("traits"),
   save: document.getElementById("save"),
   telemetry: document.getElementById("telemetry"),
@@ -212,6 +222,7 @@ const saveState = {
 
 let actionMessage = "";
 let actionMessageTimer = 0;
+let selectedMateId = null;
 const telemetry = {
   enabled: true,
   fps: 0,
@@ -1426,6 +1437,7 @@ function clearGroup(group) {
   }
   group.length = 0;
   if (group === populations.mates && mateLockVisual) {
+    selectedMateId = null;
     mateLockVisual.group.visible = false;
   }
 }
@@ -1550,6 +1562,8 @@ function spawnMateCluster() {
       marker: createRivalMarker(mesh, `R${i + 1}`),
     });
   }
+
+  ensureSelectedMate();
 }
 
 function desiredPopulation() {
@@ -1622,6 +1636,87 @@ function requirementText(req) {
   return `${req.type}:${req.min}`;
 }
 
+function requirementShort(req) {
+  if (!req) return "req?";
+  if (req.type === "energy") return `E>=${Math.round(req.min * 100)}%`;
+  if (req.type === "chase") return `C>=${req.min}`;
+  if (req.type === "forage") return `F>=${req.min}`;
+  return `${req.type}:${req.min}`;
+}
+
+function strongestMateMod(mate, dir) {
+  let bestKey = TRAIT_KEYS[0];
+  let bestVal = mate.mods[bestKey] || 0;
+  for (const key of TRAIT_KEYS) {
+    const value = mate.mods[key] || 0;
+    if ((dir > 0 && value > bestVal) || (dir < 0 && value < bestVal)) {
+      bestVal = value;
+      bestKey = key;
+    }
+  }
+  return { key: bestKey, value: bestVal };
+}
+
+function mateModSummary(mate) {
+  const up = strongestMateMod(mate, 1);
+  const down = strongestMateMod(mate, -1);
+  const upSign = up.value >= 0 ? "+" : "-";
+  const downSign = down.value >= 0 ? "+" : "-";
+  const upAmt = Math.round(Math.abs(up.value) * 100);
+  const downAmt = Math.round(Math.abs(down.value) * 100);
+  return `${TRAIT_SHORT[up.key]}${upSign}${upAmt}/${TRAIT_SHORT[down.key]}${downSign}${downAmt}`;
+}
+
+function getSelectedMate() {
+  if (selectedMateId == null) return null;
+  for (const mate of populations.mates) {
+    if (mate.id === selectedMateId && !mate.captured) return mate;
+  }
+  return null;
+}
+
+function ensureSelectedMate() {
+  if (populations.mates.length === 0) {
+    selectedMateId = null;
+    return null;
+  }
+  const current = getSelectedMate();
+  if (current) return current;
+  const ordered = populations.mates
+    .filter((mate) => !mate.captured)
+    .sort((a, b) => a.slot - b.slot);
+  if (ordered.length === 0) {
+    selectedMateId = null;
+    return null;
+  }
+  selectedMateId = ordered[0].id;
+  return ordered[0];
+}
+
+function selectMateBySlot(slot, silent) {
+  for (const mate of populations.mates) {
+    if (!mate.captured && mate.slot === slot) {
+      selectedMateId = mate.id;
+      if (!silent) setActionMessage(`Mate M${slot} selected.`, 1.4);
+      return true;
+    }
+  }
+  if (!silent) setActionMessage(`Mate M${slot} unavailable.`, 1.4);
+  return false;
+}
+
+function cycleMateSelection(dir) {
+  const ordered = populations.mates
+    .filter((mate) => !mate.captured)
+    .sort((a, b) => a.slot - b.slot);
+  if (ordered.length === 0) return;
+  let idx = ordered.findIndex((mate) => mate.id === selectedMateId);
+  if (idx < 0) idx = 0;
+  else idx = (idx + dir + ordered.length) % ordered.length;
+  selectedMateId = ordered[idx].id;
+  setActionMessage(`Mate M${ordered[idx].slot} selected.`, 1.4);
+}
+
 function nearestMateState() {
   let nearestAny = null;
   let nearestAnyDist = 9999;
@@ -1648,14 +1743,14 @@ function nearestMateState() {
   };
 }
 
-function updateMateLockVisual(state) {
+function updateMateLockVisual(state, selectedMate) {
   if (!mateLockVisual) return;
   if (!canReproduce() || !state) {
     mateLockVisual.group.visible = false;
     return;
   }
 
-  const target = state.nearestEligible || state.nearestAny;
+  const target = selectedMate || state.nearestEligible || state.nearestAny;
   if (!target || !target.mesh) {
     mateLockVisual.group.visible = false;
     return;
@@ -1683,11 +1778,9 @@ function updateMateLockVisual(state) {
   mateLockVisual.line.geometry.attributes.position.needsUpdate = true;
   mateLockVisual.line.geometry.computeBoundingSphere();
 
-  const inRange =
-    !!state.nearestEligible &&
-    state.nearestEligible.id === target.id &&
-    state.nearestEligibleDist <= BALANCE.player.reproductionInteractDistance;
   const eligible = requirementMet(target.requirement);
+  const targetDist = target.mesh.position.distanceTo(player.mesh.position);
+  const inRange = eligible && targetDist <= BALANCE.player.reproductionInteractDistance;
   const lineColor = inRange ? 0xb8ff77 : eligible ? 0x8edcff : 0x748392;
   mateLockVisual.lineMaterial.color.setHex(lineColor);
   mateLockVisual.tipMaterial.color.setHex(inRange ? 0xeeffdb : eligible ? 0xd6f4ff : 0xcfd7df);
@@ -2007,7 +2100,7 @@ function updateMatesAndRivals(dt) {
   if (!canReproduce()) {
     clearGroup(populations.mates);
     clearGroup(populations.rivals);
-    updateMateLockVisual(null);
+    updateMateLockVisual(null, null);
     return;
   }
 
@@ -2015,6 +2108,7 @@ function updateMatesAndRivals(dt) {
     spawnMateCluster();
   }
 
+  const selectedMate = ensureSelectedMate();
   const state = nearestMateState();
 
   for (const mate of populations.mates) {
@@ -2023,9 +2117,11 @@ function updateMatesAndRivals(dt) {
     const eligible = requirementMet(mate.requirement);
     const isNearestEligible = !!state.nearestEligible && state.nearestEligible.id === mate.id;
     const isNearestAny = !!state.nearestAny && state.nearestAny.id === mate.id;
+    const isSelected = !!selectedMate && selectedMate.id === mate.id;
 
-    mate.mesh.scale.setScalar(1 + Math.sin(mate.pulse) * (isNearestAny ? 0.11 : 0.07));
+    mate.mesh.scale.setScalar(1 + Math.sin(mate.pulse) * (isSelected ? 0.13 : isNearestAny ? 0.11 : 0.07));
     let tint = eligible ? 0x9cd8ff : 0x5f6f80;
+    if (isSelected) tint = eligible ? 0xc4ecff : 0x8993a1;
     if (isNearestEligible) tint = 0xb3ff78;
     mate.mesh.material.color.setHex(tint);
     setPhenotypeTint(mate.mesh, tint);
@@ -2035,15 +2131,23 @@ function updateMatesAndRivals(dt) {
     }
 
     if (mate.marker) {
-      const ringColor = eligible ? (isNearestEligible ? 0xc6ff87 : 0x95dcff) : 0x728496;
+      const ringColor = eligible
+        ? isNearestEligible
+          ? 0xc6ff87
+          : isSelected
+            ? 0xb6e8ff
+            : 0x95dcff
+        : isSelected
+          ? 0xa0acbb
+          : 0x728496;
       mate.marker.ringMaterial.color.setHex(ringColor);
       mate.marker.beamMaterial.color.setHex(ringColor);
       mate.marker.tipMaterial.color.setHex(eligible ? 0xf0ffe6 : 0xc5cfd8);
-      mate.marker.beam.scale.y = isNearestAny ? 1.25 : 1;
+      mate.marker.beam.scale.y = isSelected ? 1.34 : isNearestAny ? 1.25 : 1;
       mate.marker.tip.position.y = 2.08 + Math.sin(mate.pulse * 1.8) * 0.08;
       mate.marker.tag.position.y = 2.65 + Math.sin(mate.pulse * 1.7) * 0.05;
-      mate.marker.tag.material.opacity = isNearestAny ? 1 : 0.9;
-      const tagScale = isNearestAny ? 1.12 : 1;
+      mate.marker.tag.material.opacity = isSelected || isNearestAny ? 1 : 0.9;
+      const tagScale = isSelected ? 1.2 : isNearestAny ? 1.12 : 1;
       mate.marker.tag.scale.set(1.55 * tagScale, 0.78 * tagScale, 1);
       mate.marker.group.rotation.y += dt * 0.7;
     }
@@ -2088,11 +2192,12 @@ function updateMatesAndRivals(dt) {
   if (populations.mates.length === 0) {
     clearGroup(populations.rivals);
     player.reproductionCooldown = BALANCE.player.reproductionCooldownAfterFail;
-    updateMateLockVisual(null);
+    updateMateLockVisual(null, null);
     return;
   }
 
-  updateMateLockVisual(nearestMateState());
+  const selectedAfter = ensureSelectedMate();
+  updateMateLockVisual(nearestMateState(), selectedAfter);
 }
 
 function updatePlayer(dt) {
@@ -2283,6 +2388,34 @@ function tryReproduce() {
     return;
   }
 
+  const selectedMate = ensureSelectedMate();
+  if (selectedMate) {
+    const selectedDist = selectedMate.mesh.position.distanceTo(player.mesh.position);
+    const selectedEligible = requirementMet(selectedMate.requirement);
+    if (
+      selectedEligible &&
+      selectedDist <= BALANCE.player.reproductionInteractDistance
+    ) {
+      nextGeneration(selectedMate);
+      setActionMessage("Reproduction success: next generation begins.", 3.1);
+      return;
+    }
+
+    if (selectedEligible) {
+      setActionMessage(
+        `M${selectedMate.slot} selected at ${selectedDist.toFixed(1)}m (need <= ${BALANCE.player.reproductionInteractDistance.toFixed(
+          1
+        )}m).`
+      );
+      return;
+    }
+
+    setActionMessage(
+      `M${selectedMate.slot} selected but locked (${requirementText(selectedMate.requirement)}).`
+    );
+    return;
+  }
+
   const state = nearestMateState();
 
   if (
@@ -2348,15 +2481,24 @@ function hudText() {
   if (ui.repro) {
     let reproLine = "Reproduction: not ready yet.";
     if (canReproduce()) {
+      const selectedMate = ensureSelectedMate();
       const state = nearestMateState();
-      if (state.nearestEligible) {
-        reproLine = `Reproduction: Mate #${state.nearestEligible.slot} eligible (${state.nearestEligibleDist.toFixed(
-          1
-        )}m)`;
+      if (selectedMate) {
+        const selectedDist = selectedMate.mesh.position.distanceTo(player.mesh.position);
+        const selectedEligible = requirementMet(selectedMate.requirement);
+        if (selectedEligible) {
+          reproLine = `Reproduction: selected M${selectedMate.slot} eligible (${selectedDist.toFixed(
+            1
+          )}m)`;
+        } else {
+          reproLine = `Reproduction: selected M${selectedMate.slot} locked (${requirementText(
+            selectedMate.requirement
+          )})`;
+        }
+      } else if (state.nearestEligible) {
+        reproLine = `Reproduction: Mate #${state.nearestEligible.slot} eligible (${state.nearestEligibleDist.toFixed(1)}m)`;
       } else if (state.nearestAny) {
-        reproLine = `Reproduction: Mate #${state.nearestAny.slot} locked (${requirementText(
-          state.nearestAny.requirement
-        )})`;
+        reproLine = `Reproduction: Mate #${state.nearestAny.slot} locked (${requirementText(state.nearestAny.requirement)})`;
       } else {
         reproLine = "Reproduction: searching for mates...";
       }
@@ -2370,8 +2512,18 @@ function hudText() {
   if (ui.target) {
     let targetLine = "Mate lock: unavailable (become reproduction-ready first).";
     if (canReproduce()) {
+      const selectedMate = ensureSelectedMate();
       const state = nearestMateState();
-      if (state.nearestEligible) {
+      if (selectedMate) {
+        const selectedDist = selectedMate.mesh.position.distanceTo(player.mesh.position);
+        const selectedEligible = requirementMet(selectedMate.requirement);
+        const inRange = selectedEligible && selectedDist <= BALANCE.player.reproductionInteractDistance;
+        targetLine = inRange
+          ? `Mate lock: selected M${selectedMate.slot} IN RANGE (${selectedDist.toFixed(1)}m) -> press E`
+          : selectedEligible
+            ? `Mate lock: selected M${selectedMate.slot} eligible (${selectedDist.toFixed(1)}m)`
+            : `Mate lock: selected M${selectedMate.slot} locked (${requirementText(selectedMate.requirement)})`;
+      } else if (state.nearestEligible) {
         const inRange = state.nearestEligibleDist <= BALANCE.player.reproductionInteractDistance;
         targetLine = inRange
           ? `Mate lock: M${state.nearestEligible.slot} IN RANGE (${state.nearestEligibleDist.toFixed(1)}m) -> press E`
@@ -2383,6 +2535,28 @@ function hudText() {
       }
     }
     ui.target.textContent = targetLine;
+  }
+
+  if (ui.mateInfo) {
+    let mateInfoLine = "Mate cards: unavailable (become reproduction-ready first).";
+    if (canReproduce()) {
+      if (populations.mates.length === 0) {
+        mateInfoLine = "Mate cards: signaling potential mates...";
+      } else {
+        ensureSelectedMate();
+        const cards = populations.mates
+          .filter((mate) => !mate.captured)
+          .sort((a, b) => a.slot - b.slot)
+          .map((mate) => {
+            const selected = mate.id === selectedMateId ? "*" : "";
+            const reqState = requirementMet(mate.requirement) ? "ok" : "lock";
+            return `${selected}M${mate.slot} ${mateModSummary(mate)} ${requirementShort(mate.requirement)} ${reqState}`;
+          })
+          .join(" | ");
+        mateInfoLine = `Mate cards: ${cards} | Select 1/2 or Q/R`;
+      }
+    }
+    ui.mateInfo.textContent = mateInfoLine;
   }
 
   ui.traits.textContent =
@@ -2424,7 +2598,7 @@ function hudText() {
 
   if (ui.hint) {
     ui.hint.textContent =
-      "Move: WASD + Arrow steer (Up/Down throttle, Left/Right turn) | Focus: F | Map: G | Reproduce: E | Tone: M | Predators: P | Telemetry: T | Save: K | Load: L | New: N | Debug: Tab | Pan: Shift+Drag | Mate markers: M1/M2 cyan-green | Rival markers: R1/R2 orange | Mate lock beam: active when reproduction-ready";
+      "Move: WASD + Arrow steer (Up/Down throttle, Left/Right turn) | Focus: F | Map: G | Reproduce: E | Mate select: 1/2 or Q/R | Tone: M | Predators: P | Telemetry: T | Save: K | Load: L | New: N | Debug: Tab | Pan: Shift+Drag | Mate markers: M1/M2 cyan-green | Rival markers: R1/R2 orange | Mate lock beam: active when reproduction-ready";
   }
 }
 
@@ -2671,6 +2845,10 @@ window.addEventListener("keydown", (e) => {
     mapState.enabled = !mapState.enabled;
     setActionMessage(`Map ${mapState.enabled ? "shown" : "hidden"}.`, 1.6);
   }
+  if (e.code === "Digit1") selectMateBySlot(1, false);
+  if (e.code === "Digit2") selectMateBySlot(2, false);
+  if (e.code === "KeyQ") cycleMateSelection(-1);
+  if (e.code === "KeyR") cycleMateSelection(1);
   if (e.code === "KeyM") cycleToneProfile();
   if (e.code === "KeyP") togglePredatorMode();
   if (e.code === "KeyT") {
@@ -2793,12 +2971,28 @@ function drawMinimap() {
   }
 
   const mateState = nearestMateState();
+  const selectedMate = getSelectedMate();
   for (const mate of populations.mates) {
     if (mate.captured) continue;
     const eligible = requirementMet(mate.requirement);
     const isNearestEligible = mateState.nearestEligible && mateState.nearestEligible.id === mate.id;
-    const color = isNearestEligible ? "#beff80" : eligible ? "#87d8ff" : "#6f7f8d";
-    drawEntity(mate.mesh.position.x, mate.mesh.position.z, isNearestEligible ? 3.1 : 2.5, color, 0.98);
+    const isSelected = selectedMate && selectedMate.id === mate.id;
+    const color = isNearestEligible
+      ? "#beff80"
+      : isSelected
+        ? eligible
+          ? "#d8f4ff"
+          : "#a8b3bf"
+        : eligible
+          ? "#87d8ff"
+          : "#6f7f8d";
+    drawEntity(
+      mate.mesh.position.x,
+      mate.mesh.position.z,
+      isSelected ? 3.35 : isNearestEligible ? 3.1 : 2.5,
+      color,
+      0.98
+    );
   }
 
   for (const rival of populations.rivals) {
@@ -2834,7 +3028,7 @@ function drawMinimap() {
   ctx.stroke();
 
   if (ui.mapLegend) {
-    ui.mapLegend.textContent = `Map: G | Radius ${range.toFixed(0)}m | White=You | Green/Cyan=Mates | Orange=Rivals`;
+    ui.mapLegend.textContent = `Map: G | Radius ${range.toFixed(0)}m | White=You | Bright=selected mate | Green/Cyan=Mates | Orange=Rivals`;
   }
 }
 

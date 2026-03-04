@@ -35,6 +35,8 @@ Open: `http://127.0.0.1:8158`
 - Mouse wheel: Zoom
 - Touch: one finger orbit, two-finger pinch zoom + pan, three-finger orbit/pan blend
 - `E`: Reproduce when near an eligible mate
+- `1` / `2`: Select mate slot directly (`M1`/`M2`)
+- `Q` / `R`: Cycle selected mate backward/forward
 - `M`: Cycle tone profile (`Scientific` -> `Balanced` -> `Stylized`)
 - `T`: Toggle telemetry line
 - `K`: Save snapshot
@@ -55,7 +57,8 @@ Open: `http://127.0.0.1:8158`
 - Reproduction feedback now shows nearest mate distance/lock reason, and mate spawn is centered near the player when ready.
 - Mate readability: mates use cyan/green beacon markers (green = eligible); rivals use orange warning cones.
 - Mate/rival markers now include floating labels (`M1/M2`, `R1/R2`) for quick identification.
-- Mate lock HUD line + world-space lock beam now point to the current target (`M#`) and turn green in interaction range.
+- Mate lock HUD line + world-space lock beam now prioritize your selected mate (`M#`) and turn green in interaction range.
+- Mate cards are shown in HUD with trait deltas and requirement shorthand so evolution choices can be deliberate.
 - Mates can have requirements (forage/chase/energy), and rivals can steal mates.
 - Biomes expand as generation tier increases:
   - Tier 1: meadow only
