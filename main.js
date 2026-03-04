@@ -33,16 +33,24 @@ const BALANCE = {
     reproductionInteractDistance: 3.4,
     reproductionCooldownAfterFail: 18,
     reproductionCooldownAfterBirth: 12,
-    offspringStartEnergyRatio: 0.64,
-    deathResetEnergyRatio: 0.55,
-    energyDrainBase: 0.58,
-    energyDrainMoveScale: 0.75,
+    offspringStartEnergyRatio: 0.74,
+    deathResetEnergyRatio: 0.68,
+    energyDrainBase: 0.4,
+    energyDrainMoveScale: 0.62,
     scorchDrainScale: 0.95,
     wetlandDrainScale: 0.74,
     lowEnergyRatio: 0.22,
-    lowEnergyDamageBase: 0.65,
+    lowEnergyDamageBase: 0.48,
     lowEnergyDamageHazardScale: 0.28,
     passiveHealthRegen: 0.55,
+    earlyLifeGraceSeconds: 32,
+    earlyLifeDrainMult: 0.72,
+    lowEnergyDamageGraceSeconds: 20,
+    idleDrainScale: 0.44,
+    idleThresholdRatio: 0.28,
+    idleEnergyRecovery: 0.26,
+    floraHealthGain: 1.2,
+    preyHealthGain: 2.2,
     predatorContactDamage: 18,
     predatorKnockback: 4.8,
   },
@@ -203,6 +211,8 @@ const ui = {
   status: document.getElementById("status"),
   repro: document.getElementById("repro"),
   target: document.getElementById("target"),
+  matingCallBtn: document.getElementById("matingCallBtn"),
+  mateCards: document.getElementById("mateCards"),
   mateInfo: document.getElementById("mateInfo"),
   traits: document.getElementById("traits"),
   save: document.getElementById("save"),
@@ -224,6 +234,7 @@ const saveState = {
 let actionMessage = "";
 let actionMessageTimer = 0;
 let selectedMateId = null;
+let mateCardsRenderKey = "";
 const telemetry = {
   enabled: true,
   fps: 0,
@@ -1853,6 +1864,7 @@ function clearGroup(group) {
   if (group === populations.mates && mateLockVisual) {
     selectedMateId = null;
     mateLockVisual.group.visible = false;
+    mateCardsRenderKey = "";
   }
 }
 
@@ -1878,7 +1890,7 @@ function spawnMateCluster() {
   root.x += Math.cos(angle) * dist;
   root.z += Math.sin(angle) * dist;
   limitToWorld(root);
-  const mateCount = simpleMode ? 1 : 2;
+  const mateCount = simpleMode ? 3 : 2;
   for (let i = 0; i < mateCount; i += 1) {
     const id = nextId();
     const mesh = makeSphere(0x9cd8ff, 1.12, 14);
@@ -1916,34 +1928,43 @@ function spawnMateCluster() {
           ? { type: "chase", min: Math.max(1, Math.round(2 * reqScale)) }
           : { type: "forage", min: Math.max(2, Math.round(6 * reqScale)) };
 
+    const mateTraits = {
+      speed: clamp(0.45 + mods.speed, 0, 1),
+      stamina: clamp(0.45 + mods.stamina, 0, 1),
+      herbivore: clamp(0.45 + mods.herbivore, 0, 1),
+      carnivore: clamp(0.45 + mods.carnivore, 0, 1),
+      swim: clamp(0.35 + mods.swim, 0, 1),
+      heat: clamp(0.35 + mods.heat, 0, 1),
+      social: clamp(0.6 + mods.social, 0, 1),
+    };
+    const phenotypeProfile = makePhenotypeProfile({
+      seed: id * 19 + i,
+      role: "mate",
+      traits: mateTraits,
+    });
+    const offspringPreviewTraits = previewOffspringTraits(mods);
+    const offspringPreviewProfile = makePhenotypeProfile({
+      seed: id * 31 + player.generation * 97,
+      role: "player",
+      traits: offspringPreviewTraits,
+    });
+
     populations.mates.push({
       id,
       slot: i + 1,
       mesh,
       mods,
+      traits: mateTraits,
+      phenotypeProfile,
+      offspringPreviewTraits,
+      offspringPreviewProfile,
       pulse: rand(0, Math.PI * 2),
       requirement,
       captured: false,
       heightOffset: 1.2,
       marker: createMateMarker(mesh, `M${i + 1}`),
     });
-    applyPhenotype(
-      mesh,
-      0x9cd8ff,
-      makePhenotypeProfile({
-        seed: id * 19 + i,
-        role: "mate",
-        traits: {
-          speed: clamp(0.45 + mods.speed, 0, 1),
-          stamina: clamp(0.45 + mods.stamina, 0, 1),
-          herbivore: clamp(0.45 + mods.herbivore, 0, 1),
-          carnivore: clamp(0.45 + mods.carnivore, 0, 1),
-          swim: clamp(0.35 + mods.swim, 0, 1),
-          heat: clamp(0.35 + mods.heat, 0, 1),
-          social: clamp(0.6 + mods.social, 0, 1),
-        },
-      })
-    );
+    applyPhenotype(mesh, 0x9cd8ff, phenotypeProfile);
   }
 
   if (!simpleMode) {
@@ -2093,7 +2114,9 @@ function reproductionActionState() {
   if (populations.mates.length === 0) {
     return {
       step: simpleMode ? "1/2" : "1/3",
-      text: simpleMode ? "Press E once to call a mate." : "Press E once to signal mates.",
+      text: simpleMode
+        ? "Press Mating Call (button or E) to summon candidates."
+        : "Press Mating Call (button or E) to signal mates.",
     };
   }
 
@@ -2101,7 +2124,9 @@ function reproductionActionState() {
   if (!selectedMate) {
     return {
       step: simpleMode ? "1/2" : "1/3",
-      text: simpleMode ? "No mate available. Press E again to call one nearby." : "No mate selected. Use 1/2 or Q/R.",
+      text: simpleMode
+        ? "No mate selected. Choose one from the mate cards."
+        : "No mate selected. Choose one from the mate cards or use 1/2/Q/R.",
     };
   }
 
@@ -2111,7 +2136,7 @@ function reproductionActionState() {
     return {
       step: simpleMode ? "2/2" : "2/3",
       text: simpleMode
-        ? `Mate locked (${requirementText(selectedMate.requirement)}). Press E to call another.`
+        ? `Mate locked (${requirementText(selectedMate.requirement)}). Use Mating Call to refresh candidates.`
         : `M${selectedMate.slot} locked (${requirementText(selectedMate.requirement)}). Choose another mate or satisfy requirement.`,
     };
   }
@@ -2140,6 +2165,36 @@ function requirementShort(req) {
   if (req.type === "chase") return `C>=${req.min}`;
   if (req.type === "forage") return `F>=${req.min}`;
   return `${req.type}:${req.min}`;
+}
+
+function signedPercent(value) {
+  const pct = Math.round((Number(value) || 0) * 100);
+  return `${pct >= 0 ? "+" : ""}${pct}%`;
+}
+
+function dietBiasLabel(traits) {
+  const herb = Number(traits && traits.herbivore) || 0;
+  const carn = Number(traits && traits.carnivore) || 0;
+  if (herb > carn + 0.14) return "grazer-lean";
+  if (carn > herb + 0.14) return "hunter-lean";
+  return "omnivore-lean";
+}
+
+function matePhenotypeDescriptor(profile, traits) {
+  if (!profile) return "unknown body";
+  const avgScale = (profile.bodyScale.x + profile.bodyScale.y + profile.bodyScale.z) / 3;
+  const build = avgScale > 1.2 ? "bulky" : avgScale < 0.92 ? "slender" : "balanced";
+  const appendage =
+    profile.appendageType === "leg" ? "legged" : profile.appendageType === "fin" ? "finned" : "spined";
+  const tail = profile.tailLength > 1.15 ? "long tail" : profile.tailLength < 0.58 ? "short tail" : "medium tail";
+  return `${build} ${appendage} (${profile.appendageCount}) ${tail} ${dietBiasLabel(traits)}`;
+}
+
+function mateGenePullSummary(mate, count) {
+  const top = TRAIT_KEYS.map((key) => ({ key, value: Number(mate.mods[key]) || 0 }))
+    .sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
+    .slice(0, count || 3);
+  return top.map((entry) => `${TRAIT_SHORT[entry.key]} ${signedPercent(entry.value)}`).join(" | ");
 }
 
 function strongestMateMod(mate, dir) {
@@ -2191,12 +2246,25 @@ function ensureSelectedMate() {
   return ordered[0];
 }
 
+function selectMateById(id, silent) {
+  for (const mate of populations.mates) {
+    if (!mate.captured && mate.id === id) {
+      selectedMateId = mate.id;
+      if (!silent) {
+        const summary = matePhenotypeDescriptor(mate.phenotypeProfile, mate.traits);
+        setActionMessage(`Mate M${mate.slot} selected: ${summary}.`, 2.1);
+      }
+      return true;
+    }
+  }
+  if (!silent) setActionMessage("Selected mate is unavailable.", 1.6);
+  return false;
+}
+
 function selectMateBySlot(slot, silent) {
   for (const mate of populations.mates) {
     if (!mate.captured && mate.slot === slot) {
-      selectedMateId = mate.id;
-      if (!silent) setActionMessage(`Mate M${slot} selected.`, 1.4);
-      return true;
+      return selectMateById(mate.id, silent);
     }
   }
   if (!silent) setActionMessage(`Mate M${slot} unavailable.`, 1.4);
@@ -2211,8 +2279,104 @@ function cycleMateSelection(dir) {
   let idx = ordered.findIndex((mate) => mate.id === selectedMateId);
   if (idx < 0) idx = 0;
   else idx = (idx + dir + ordered.length) % ordered.length;
-  selectedMateId = ordered[idx].id;
-  setActionMessage(`Mate M${ordered[idx].slot} selected.`, 1.4);
+  selectMateById(ordered[idx].id, false);
+}
+
+function matingButtonText() {
+  const req = reproductionThresholds();
+  if (!(req.readyAge && req.readyEnergy && req.readyHealth && req.readyCooldown)) {
+    return "Mating Call (not ready)";
+  }
+  if (populations.mates.length === 0) return "Mating Call (E)";
+  return "Refresh Mating Call";
+}
+
+function updateMatingCallButton() {
+  if (!ui.matingCallBtn) return;
+  ui.matingCallBtn.textContent = matingButtonText();
+  ui.matingCallBtn.disabled = !canReproduce();
+}
+
+function renderMateCards() {
+  if (!ui.mateCards) return;
+  if (!canReproduce()) {
+    ui.mateCards.innerHTML = "";
+    mateCardsRenderKey = "";
+    return;
+  }
+  const ordered = populations.mates
+    .filter((mate) => !mate.captured)
+    .sort((a, b) => a.slot - b.slot);
+  if (ordered.length === 0) {
+    const emptyKey = "empty";
+    if (mateCardsRenderKey === emptyKey) return;
+    mateCardsRenderKey = emptyKey;
+    ui.mateCards.innerHTML = `<div class="mate-card"><div class="mate-line">No candidates yet. Press <strong>Mating Call</strong> to summon mates.</div></div>`;
+    return;
+  }
+
+  const selected = ensureSelectedMate();
+  const renderKey = ordered
+    .map((mate) => {
+      const selectedFlag = selected && mate.id === selected.id ? "1" : "0";
+      const eligibleFlag = requirementMet(mate.requirement) ? "1" : "0";
+      const dist = mate.mesh.position.distanceTo(player.mesh.position).toFixed(1);
+      return `${mate.id}:${selectedFlag}:${eligibleFlag}:${dist}:${mate.captured ? 1 : 0}`;
+    })
+    .join("|");
+  if (mateCardsRenderKey === renderKey) return;
+  mateCardsRenderKey = renderKey;
+
+  ui.mateCards.innerHTML = ordered
+    .map((mate) => {
+      const isSelected = !!selected && selected.id === mate.id;
+      const eligible = requirementMet(mate.requirement);
+      const dist = mate.mesh.position.distanceTo(player.mesh.position);
+      const candidateTraits = mate.traits || sanitizeTraits(DEFAULT_TRAITS);
+      const candidateProfile = mate.phenotypeProfile;
+      const previewTraits = mate.offspringPreviewTraits || previewOffspringTraits(mate.mods);
+      const previewProfile =
+        mate.offspringPreviewProfile ||
+        makePhenotypeProfile({
+          seed: mate.id * 31 + player.generation * 97,
+          role: "player",
+          traits: previewTraits,
+        });
+      const candidateSummary = matePhenotypeDescriptor(candidateProfile, candidateTraits);
+      const previewSummary = matePhenotypeDescriptor(previewProfile, previewTraits);
+      const cardClass = `mate-card${isSelected ? " selected" : ""}${eligible ? "" : " locked"}`;
+      const badgeClass = `mate-badge${eligible ? "" : " locked"}`;
+      const badgeText = eligible ? "eligible" : "locked";
+      const buttonText = isSelected ? "Selected" : "Choose";
+      return `<div class="${cardClass}">
+        <div class="mate-top">
+          <div class="mate-title">Mate M${mate.slot}</div>
+          <div class="${badgeClass}">${badgeText}</div>
+          <button class="mate-select" data-mate-select="${mate.id}" type="button">${buttonText}</button>
+        </div>
+        <div class="mate-line">Phenotype: ${candidateSummary}</div>
+        <div class="mate-line">Genotype pull: ${mateGenePullSummary(mate, 3)}</div>
+        <div class="mate-line">Offspring forecast: ${previewSummary}</div>
+        <div class="mate-line">Distance ${dist.toFixed(1)}m | Requirement: ${requirementText(mate.requirement)}</div>
+      </div>`;
+    })
+    .join("");
+}
+
+function triggerMatingCall() {
+  const req = reproductionThresholds();
+  if (!(req.readyAge && req.readyEnergy && req.readyHealth && req.readyCooldown)) {
+    setActionMessage("Mating call unavailable until reproduction readiness is complete.", 2.4);
+    return false;
+  }
+  spawnMateCluster();
+  const count = populations.mates.length;
+  setActionMessage(
+    `Mating call sent. ${count} candidate${count === 1 ? "" : "s"} arrived. Choose a mate card by phenotype, move close, then press E.`,
+    3.6
+  );
+  mateCardsRenderKey = "";
+  return true;
 }
 
 function nearestMateState() {
@@ -2302,6 +2466,11 @@ function consumeFlora(node) {
   node.mesh.visible = false;
   const gain = node.energy * (BALANCE.feeding.floraGainBase + player.traits.herbivore);
   player.energy = clamp(player.energy + gain, 0, maxEnergy());
+  player.health = clamp(
+    player.health + BALANCE.player.floraHealthGain * (0.65 + player.traits.herbivore * 0.35),
+    0,
+    100
+  );
   player.metrics.plants += 1;
 }
 
@@ -2315,6 +2484,11 @@ function consumePrey(prey) {
     rand(BALANCE.feeding.preyEnergyMin, BALANCE.feeding.preyEnergyMax) *
     (BALANCE.feeding.preyGainBase + player.traits.carnivore);
   player.energy = clamp(player.energy + gain, 0, maxEnergy());
+  player.health = clamp(
+    player.health + BALANCE.player.preyHealthGain * (0.65 + player.traits.carnivore * 0.35),
+    0,
+    100
+  );
   player.metrics.prey += 1;
   const stamp = ACTIVE_CHASE.get(prey.id);
   if (stamp !== undefined && stamp > simTime - BALANCE.feeding.chaseSuccessWindow) {
@@ -2604,10 +2778,6 @@ function updateMatesAndRivals(dt) {
     return;
   }
 
-  if (populations.mates.length === 0) {
-    spawnMateCluster();
-  }
-
   const selectedMate = ensureSelectedMate();
   const state = nearestMateState();
 
@@ -2690,8 +2860,12 @@ function updateMatesAndRivals(dt) {
   populations.mates = populations.mates.filter((m) => !m.captured);
 
   if (populations.mates.length === 0) {
+    const hadRivals = populations.rivals.length > 0;
     clearGroup(populations.rivals);
-    player.reproductionCooldown = BALANCE.player.reproductionCooldownAfterFail;
+    if (hadRivals) {
+      player.reproductionCooldown = BALANCE.player.reproductionCooldownAfterFail;
+      setActionMessage("Rivals disrupted mating. Recover before the next mating call.", 2.2);
+    }
     updateMateLockVisual(null, null);
     return;
   }
@@ -2767,6 +2941,12 @@ function updatePlayer(dt) {
   let energyDrain =
     (BALANCE.player.energyDrainBase + moveDelta.length() * BALANCE.player.energyDrainMoveScale) *
     dt;
+  const moveSpdSafe = Math.max(0.01, moveSpd);
+  const speedRatio = clamp(player.vel.length() / moveSpdSafe, 0, 1);
+  const idleThreshold = clamp(BALANCE.player.idleThresholdRatio, 0.02, 1);
+  const idleBlend = speedRatio >= idleThreshold ? 1 : speedRatio / idleThreshold;
+  const idleDrainScale = BALANCE.player.idleDrainScale + (1 - BALANCE.player.idleDrainScale) * idleBlend;
+  energyDrain *= idleDrainScale;
 
   if (biome === BIOMES.volcanic.id) {
     player.metrics.heatExposure += dt;
@@ -2779,10 +2959,21 @@ function updatePlayer(dt) {
     energyDrain += (1 - player.traits.swim) * WORLD.hazardScale * BALANCE.player.wetlandDrainScale * dt * 0.28;
   }
   energyDrain *= tone.energyDrainMult;
+  if (player.age < BALANCE.player.earlyLifeGraceSeconds) {
+    energyDrain *= BALANCE.player.earlyLifeDrainMult;
+  }
 
-  player.energy = clamp(player.energy - energyDrain, 0, maxEnergy());
+  const canIdleRecover =
+    speedRatio < idleThreshold * 0.95 &&
+    biome !== BIOMES.volcanic.id &&
+    (!BALANCE.gameplay.predatorsEnabled || ACTIVE_THREATS.size === 0);
+  const idleRecovery = canIdleRecover
+    ? BALANCE.player.idleEnergyRecovery * (0.7 + player.traits.stamina * 0.6) * dt
+    : 0;
+  player.energy = clamp(player.energy - energyDrain + idleRecovery, 0, maxEnergy());
 
-  if (player.energy < maxEnergy() * BALANCE.player.lowEnergyRatio) {
+  const lowEnergyDamageEnabled = player.age >= BALANCE.player.lowEnergyDamageGraceSeconds;
+  if (lowEnergyDamageEnabled && player.energy < maxEnergy() * BALANCE.player.lowEnergyRatio) {
     damagePlayer(
       (BALANCE.player.lowEnergyDamageBase +
         WORLD.hazardScale * BALANCE.player.lowEnergyDamageHazardScale) *
@@ -2802,8 +2993,7 @@ function updatePlayer(dt) {
   animatePhenotype(player.mesh, player.vel.length() / Math.max(0.01, moveSpd), simTime, dt);
 }
 
-function evolveTraits(mateMods) {
-  const tone = toneProfile();
+function buildEvolutionTargetTraits() {
   const m = player.metrics;
   const age = Math.max(player.age, 1);
   const totalFood = m.plants + m.prey;
@@ -2816,7 +3006,7 @@ function evolveTraits(mateMods) {
   const waterRatio = clamp(m.waterExposure / age, 0, 1);
   const socialRatio = clamp(m.socialExposure / age, 0, 1);
 
-  const target = {
+  return {
     speed: clamp(0.2 + chaseRate * 0.5 + evadeRate * 0.18, 0, 1),
     stamina: clamp(0.2 + activeRatio * 0.62, 0, 1),
     herbivore: clamp(plantRatio, 0, 1),
@@ -2825,7 +3015,10 @@ function evolveTraits(mateMods) {
     heat: clamp(heatRatio, 0, 1),
     social: clamp(socialRatio, 0, 1),
   };
+}
 
+function blendOffspringTraits(target, mateMods, includeMutation) {
+  const tone = toneProfile();
   const next = {};
   const targetWeight = clamp(
     BALANCE.evolution.targetWeight * tone.targetWeightScale,
@@ -2833,9 +3026,9 @@ function evolveTraits(mateMods) {
     0.45
   );
   for (const key of TRAIT_KEYS) {
-    const mutation =
-      rand(BALANCE.evolution.mutationMin, BALANCE.evolution.mutationMax) *
-      tone.mutationScale;
+    const mutation = includeMutation
+      ? rand(BALANCE.evolution.mutationMin, BALANCE.evolution.mutationMax) * tone.mutationScale
+      : 0;
     const v =
       player.traits[key] * BALANCE.evolution.parentWeight +
       target[key] * targetWeight +
@@ -2852,6 +3045,14 @@ function evolveTraits(mateMods) {
   return next;
 }
 
+function previewOffspringTraits(mateMods) {
+  return blendOffspringTraits(buildEvolutionTargetTraits(), mateMods, false);
+}
+
+function evolveTraits(mateMods) {
+  return blendOffspringTraits(buildEvolutionTargetTraits(), mateMods, true);
+}
+
 function nextGeneration(mate) {
   telemetry.births += 1;
   const entry = {
@@ -2859,6 +3060,14 @@ function nextGeneration(mate) {
     age: Number(player.age.toFixed(1)),
     food: { plants: player.metrics.plants, prey: player.metrics.prey },
     traits: { ...player.traits },
+    mateChoice: {
+      slot: mate.slot,
+      phenotype: matePhenotypeDescriptor(mate.phenotypeProfile, mate.traits),
+      genotypePull: TRAIT_KEYS.reduce((out, key) => {
+        out[key] = Number((mate.mods[key] || 0).toFixed(4));
+        return out;
+      }, {}),
+    },
   };
   player.lineage.push(entry);
 
@@ -2888,20 +3097,16 @@ function tryReproduce() {
   }
 
   if (populations.mates.length === 0) {
-    spawnMateCluster();
-    setActionMessage(
-      simpleMode
-        ? "Mate called nearby. Move close to M1, then press E again."
-        : "Mates signaled nearby. Select one (1/2 or Q/R), move close, then press E.",
-      3.2
-    );
+    triggerMatingCall();
     return;
   }
 
   const selectedMate = ensureSelectedMate();
   if (!selectedMate) {
     setActionMessage(
-      simpleMode ? "No mate found. Press E to call one again." : "No mate selected. Use 1/2 or Q/R.",
+      simpleMode
+        ? "No mate selected. Choose a candidate card, then move close and press E."
+        : "No mate selected. Choose one from mate cards or use 1/2/Q/R.",
       2.0
     );
     return;
@@ -2912,7 +3117,7 @@ function tryReproduce() {
   if (!selectedEligible) {
     setActionMessage(
       simpleMode
-        ? `Mate is locked (${requirementText(selectedMate.requirement)}). Press E to call another.`
+        ? `Mate is locked (${requirementText(selectedMate.requirement)}). Refresh with Mating Call.`
         : `M${selectedMate.slot} is locked (${requirementText(selectedMate.requirement)}).`,
       2.6
     );
@@ -2932,7 +3137,10 @@ function tryReproduce() {
   }
 
   nextGeneration(selectedMate);
-  setActionMessage("Reproduction success: next generation begins.", 3.1);
+  setActionMessage(
+    `Reproduction success with M${selectedMate.slot}. Offspring bias: ${mateGenePullSummary(selectedMate, 2)}.`,
+    3.3
+  );
 }
 
 function tryDeathReset() {
@@ -2993,31 +3201,23 @@ function hudText() {
   }
 
   if (ui.mateInfo) {
-    const simpleMode = isSimpleReproductionMode();
-    let mateInfoLine = "Mate cards: unavailable (become reproduction-ready first).";
+    let mateInfoLine = "Mating unavailable: complete readiness requirements first.";
     if (canReproduce()) {
       if (populations.mates.length === 0) {
-        mateInfoLine = simpleMode
-          ? "Mate card: none active. Press E to call a nearby mate."
-          : "Mate cards: waiting for signal. Press E to spawn mates.";
+        mateInfoLine = "Press Mating Call (button or E), then pick a mate card by phenotype/genotype.";
       } else {
-        ensureSelectedMate();
-        const cards = populations.mates
-          .filter((mate) => !mate.captured)
-          .sort((a, b) => a.slot - b.slot)
-          .map((mate) => {
-            const selected = mate.id === selectedMateId ? "*" : "";
-            const reqState = requirementMet(mate.requirement) ? "ok" : "lock";
-            return `${selected}M${mate.slot} ${mateModSummary(mate)} ${requirementShort(mate.requirement)} ${reqState}`;
-          })
-          .join(" | ");
-        mateInfoLine = simpleMode
-          ? `Mate card: ${cards} | Auto-select active`
-          : `Mate cards: ${cards} | Select 1/2 or Q/R`;
+        const selectedMate = ensureSelectedMate();
+        const selectedText = selectedMate
+          ? `M${selectedMate.slot} ${matePhenotypeDescriptor(selectedMate.phenotypeProfile, selectedMate.traits)}`
+          : "none";
+        mateInfoLine = `Selected mate: ${selectedText} | Press E when in range to reproduce.`;
       }
     }
     ui.mateInfo.textContent = mateInfoLine;
   }
+
+  updateMatingCallButton();
+  renderMateCards();
 
   ui.traits.textContent =
     `Traits  speed ${player.traits.speed.toFixed(2)}  stamina ${player.traits.stamina.toFixed(
@@ -3057,16 +3257,8 @@ function hudText() {
   }
 
   if (ui.hint) {
-    const simpleMode = isSimpleReproductionMode();
-    const reproHint = simpleMode
-      ? "Reproduce: E (ready -> E to call mate -> move close -> E again)"
-      : "Reproduce: E (follow Repro action line)";
-    const mateHint = simpleMode ? "" : " | Mate select: 1/2 or Q/R";
-    const markerHint = simpleMode
-      ? " | Mate marker: M1 mint glow"
-      : " | Mate markers: M1/M2 mint-gold | Rival markers: R1/R2 orange";
     ui.hint.textContent =
-      `Move: WASD + Arrow steer (Up/Down throttle, Left/Right turn) | Focus: F | Map: G | ${reproHint}${mateHint} | Tone: M | Predators: P | Telemetry: T | Save: K | Load: L | New: N | Debug: Tab | Pan: Shift+Drag${markerHint}`;
+      "Move: WASD + Arrow steer (Up/Down throttle, Left/Right turn) | Focus: F | Map: G | Mating Call: button/E | Select mate: card click (or 1/2/3/Q/R) | Reproduce: E in range | Tone: M | Predators: P | Telemetry: T | Save: K | Load: L | New: N | Debug: Tab | Pan: Shift+Drag";
   }
 }
 
@@ -3302,6 +3494,26 @@ renderer.domElement.addEventListener(
   { passive: false }
 );
 
+if (ui.matingCallBtn) {
+  ui.matingCallBtn.addEventListener("click", (e) => {
+    if (e.cancelable) e.preventDefault();
+    triggerMatingCall();
+  });
+}
+
+if (ui.mateCards) {
+  ui.mateCards.addEventListener("click", (e) => {
+    const target = e.target instanceof Element ? e.target : null;
+    if (!target) return;
+    const selectButton = target.closest("[data-mate-select]");
+    if (!selectButton) return;
+    const id = Number(selectButton.getAttribute("data-mate-select"));
+    if (!Number.isFinite(id)) return;
+    selectMateById(id, false);
+    mateCardsRenderKey = "";
+  });
+}
+
 window.addEventListener("keydown", (e) => {
   if (e.code.startsWith("Arrow")) {
     e.preventDefault();
@@ -3313,12 +3525,11 @@ window.addEventListener("keydown", (e) => {
     mapState.enabled = !mapState.enabled;
     setActionMessage(`Map ${mapState.enabled ? "shown" : "hidden"}.`, 1.6);
   }
-  if (!isSimpleReproductionMode()) {
-    if (e.code === "Digit1") selectMateBySlot(1, false);
-    if (e.code === "Digit2") selectMateBySlot(2, false);
-    if (e.code === "KeyQ") cycleMateSelection(-1);
-    if (e.code === "KeyR") cycleMateSelection(1);
-  }
+  if (e.code === "Digit1") selectMateBySlot(1, false);
+  if (e.code === "Digit2") selectMateBySlot(2, false);
+  if (e.code === "Digit3") selectMateBySlot(3, false);
+  if (e.code === "KeyQ") cycleMateSelection(-1);
+  if (e.code === "KeyR") cycleMateSelection(1);
   if (e.code === "KeyM") cycleToneProfile();
   if (e.code === "KeyP") togglePredatorMode();
   if (e.code === "KeyT") {

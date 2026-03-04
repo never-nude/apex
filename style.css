@@ -88,6 +88,119 @@ body {
   font-size: 12px;
 }
 
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 4px;
+}
+
+.action-btn {
+  appearance: none;
+  border: 1px solid rgba(244, 246, 186, 0.72);
+  border-radius: 8px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fef9d7;
+  background: linear-gradient(160deg, rgba(113, 166, 79, 0.86), rgba(71, 125, 58, 0.84));
+  cursor: pointer;
+  transition: transform 0.12s ease, filter 0.12s ease, border-color 0.12s ease;
+}
+
+.action-btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.05);
+  border-color: rgba(249, 250, 202, 0.9);
+}
+
+.action-btn:active {
+  transform: translateY(0);
+  filter: brightness(0.98);
+}
+
+.action-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+  filter: saturate(0.65);
+}
+
+.mate-cards {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  margin: 4px 0 6px;
+}
+
+.mate-card {
+  border: 1px solid rgba(208, 224, 160, 0.36);
+  border-radius: 8px;
+  padding: 7px 8px;
+  background: rgba(38, 73, 35, 0.5);
+}
+
+.mate-card.selected {
+  border-color: rgba(255, 238, 150, 0.86);
+  box-shadow: 0 0 0 1px rgba(255, 233, 127, 0.3) inset;
+}
+
+.mate-card.locked {
+  opacity: 0.82;
+}
+
+.mate-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.mate-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #f6f9dc;
+}
+
+.mate-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: #eaf6cb;
+  background: rgba(127, 173, 91, 0.42);
+  border: 1px solid rgba(206, 231, 153, 0.45);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+.mate-badge.locked {
+  color: #d7d6cb;
+  background: rgba(110, 109, 99, 0.35);
+  border-color: rgba(184, 182, 170, 0.36);
+}
+
+.mate-select {
+  appearance: none;
+  border: 1px solid rgba(204, 234, 157, 0.55);
+  border-radius: 7px;
+  background: rgba(85, 140, 65, 0.66);
+  color: #f5fadb;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 7px;
+  cursor: pointer;
+}
+
+.mate-select:hover {
+  filter: brightness(1.08);
+}
+
+.mate-line {
+  margin: 2px 0;
+  color: #d5e8bf;
+  font-size: 11px;
+  line-height: 1.28;
+}
+
 .hidden {
   display: none;
 }
