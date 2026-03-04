@@ -59,6 +59,7 @@ Open: `http://127.0.0.1:8158`
 - Mate/rival markers now include floating labels (`M1/M2`, `R1/R2`) for quick identification.
 - Mate lock HUD line + world-space lock beam now prioritize your selected mate (`M#`) and turn green in interaction range.
 - Mate cards are shown in HUD with trait deltas and requirement shorthand so evolution choices can be deliberate.
+- Creature presentation pass: segmented body/head rigs, snout/mouth/ornament features, eye+pupil animation, markings, outline shell, and soft ground shadow.
 - Mates can have requirements (forage/chase/energy), and rivals can steal mates.
 - Biomes expand as generation tier increases:
   - Tier 1: meadow only

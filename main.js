@@ -553,8 +553,18 @@ function removePhenotype(mesh) {
 function setPhenotypeTint(mesh, hex) {
   const rig = mesh.userData.phenotypeRig;
   if (!rig) return;
-  for (const mat of rig.tintMaterials) {
-    mat.color.setHex(hex);
+  if (!rig.tintLayers) {
+    for (const mat of rig.tintMaterials || []) {
+      mat.color.setHex(hex);
+    }
+    return;
+  }
+  for (const layer of rig.tintLayers) {
+    const color = new THREE.Color(hex);
+    if (layer.h || layer.s || layer.l) {
+      color.offsetHSL(layer.h || 0, layer.s || 0, layer.l || 0);
+    }
+    layer.material.color.copy(color);
   }
 }
 
@@ -601,11 +611,21 @@ function makePhenotypeProfile(opts) {
   );
   const tailLength = clamp(0.3 + t.speed * 0.7 + t.swim * 0.5 + next() * 0.25, 0.2, 1.65);
   const eyeScale = clamp(0.08 + t.social * 0.07 + next() * 0.06 + cute * 0.04, 0.06, 0.24);
+  const eyeSpacing = clamp(0.12 + t.social * 0.1 + next() * 0.05, 0.12, 0.3);
   const bodyRadius = 0.72 + cute * 0.07;
   const appendageLength = clamp(
     (0.28 + t.speed * 0.45 + t.carnivore * 0.35 + next() * 0.24) * (1 - cute * 0.14),
     0.18,
     1.18
+  );
+  const snoutLength = clamp(0.18 + t.carnivore * 0.42 + t.herbivore * 0.18 + next() * 0.1, 0.16, 0.7);
+  const crestHeight = clamp((0.12 + t.carnivore * 0.28 + t.heat * 0.18) * (1 - cute * 0.12), 0.05, 0.46);
+  const earSize = clamp(0.1 + t.social * 0.2 + cute * 0.1 + next() * 0.06, 0.08, 0.44);
+  const stripeCount = clamp(Math.round(1 + t.carnivore * 2 + t.heat * 1.5 + next() * 1.5), 1, 4);
+  const headScale = new THREE.Vector3(
+    clamp(bodyScale.x * (0.54 + t.social * 0.11 + cute * 0.06), 0.48, 1.15),
+    clamp(bodyScale.y * (0.48 + t.stamina * 0.1 + cute * 0.05), 0.45, 1.1),
+    clamp(bodyScale.z * (0.5 + t.carnivore * 0.16 + t.herbivore * 0.12), 0.45, 1.2)
   );
 
   return {
@@ -617,6 +637,12 @@ function makePhenotypeProfile(opts) {
     dorsalCount,
     tailLength,
     eyeScale,
+    eyeSpacing,
+    snoutLength,
+    crestHeight,
+    earSize,
+    stripeCount,
+    headScale,
     bodyScale,
     bodyRadius,
   };
@@ -625,28 +651,162 @@ function makePhenotypeProfile(opts) {
 function applyPhenotype(mesh, baseColor, profile) {
   removePhenotype(mesh);
   mesh.material.transparent = true;
-  mesh.material.opacity = 0.2;
+  mesh.material.opacity = 0.14;
 
+  const role = profile.role || "neutral";
   const bodyMat = new THREE.MeshStandardMaterial({
     color: baseColor,
-    roughness: 0.72,
-    metalness: 0.08,
+    roughness: 0.62,
+    metalness: 0.12,
   });
   const accentMat = new THREE.MeshStandardMaterial({
     color: new THREE.Color(baseColor).offsetHSL(0.04, 0.05, 0.12),
-    roughness: 0.56,
-    metalness: 0.15,
+    roughness: 0.5,
+    metalness: 0.17,
   });
-  const eyeMat = new THREE.MeshStandardMaterial({ color: 0xf5f8ff, roughness: 0.4, metalness: 0.3 });
+  const underMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(baseColor).offsetHSL(0, -0.08, 0.2),
+    roughness: 0.66,
+    metalness: 0.08,
+  });
+  const markMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(baseColor).offsetHSL(-0.03, 0.1, -0.12),
+    roughness: 0.58,
+    metalness: 0.14,
+  });
+  const ornamentMat = new THREE.MeshStandardMaterial({
+    color:
+      role === "predator"
+        ? new THREE.Color(baseColor).offsetHSL(0.01, 0.08, -0.18)
+        : new THREE.Color(baseColor).offsetHSL(0.06, 0.04, 0.02),
+    roughness: 0.5,
+    metalness: 0.22,
+  });
+  const eyeMat = new THREE.MeshStandardMaterial({ color: 0xf7fbff, roughness: 0.34, metalness: 0.26 });
+  const pupilMat = new THREE.MeshStandardMaterial({ color: 0x12252d, roughness: 0.22, metalness: 0.08 });
+  const mouthMat = new THREE.MeshBasicMaterial({ color: 0x15211f, transparent: true, opacity: 0.86 });
+  const outlineMat = new THREE.MeshBasicMaterial({
+    color: 0x0f1d18,
+    side: THREE.BackSide,
+    transparent: true,
+    opacity: 0.35,
+  });
+  const shadowMat = new THREE.MeshBasicMaterial({
+    color: 0x06100d,
+    transparent: true,
+    opacity: 0.25,
+    depthWrite: false,
+  });
 
-  const tintMaterials = [bodyMat, accentMat];
+  const tintLayers = [
+    { material: bodyMat, h: 0, s: 0, l: 0 },
+    { material: accentMat, h: 0.04, s: 0.06, l: 0.1 },
+    { material: underMat, h: 0, s: -0.08, l: 0.2 },
+    { material: markMat, h: -0.03, s: 0.1, l: -0.12 },
+    { material: ornamentMat, h: 0.02, s: 0.04, l: -0.08 },
+  ];
+  const tintMaterials = [bodyMat, accentMat, underMat, markMat, ornamentMat];
   const rig = new THREE.Group();
   const appendages = [];
   const dorsal = [];
+  const ornaments = [];
+  const markings = [];
 
-  const body = new THREE.Mesh(new THREE.SphereGeometry(profile.bodyRadius, 14, 14), bodyMat);
+  const body = new THREE.Mesh(new THREE.SphereGeometry(profile.bodyRadius, 16, 16), bodyMat);
   body.scale.copy(profile.bodyScale);
   rig.add(body);
+
+  const bodyOutline = new THREE.Mesh(body.geometry, outlineMat);
+  bodyOutline.scale.copy(profile.bodyScale).multiplyScalar(1.06);
+  rig.add(bodyOutline);
+
+  const headRadius = profile.bodyRadius * 0.64;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(headRadius, 14, 14), bodyMat);
+  head.scale.copy(profile.headScale);
+  head.position.set(0, profile.bodyScale.y * 0.04, profile.bodyScale.z * 0.84);
+  rig.add(head);
+
+  const headOutline = new THREE.Mesh(head.geometry, outlineMat);
+  headOutline.scale.copy(profile.headScale).multiplyScalar(1.07);
+  headOutline.position.copy(head.position);
+  rig.add(headOutline);
+
+  const belly = new THREE.Mesh(new THREE.SphereGeometry(profile.bodyRadius * 0.72, 12, 12), underMat);
+  belly.scale.set(profile.bodyScale.x * 0.84, profile.bodyScale.y * 0.52, profile.bodyScale.z * 0.74);
+  belly.position.set(0, -profile.bodyScale.y * 0.2, profile.bodyScale.z * 0.12);
+  rig.add(belly);
+
+  for (let i = 0; i < profile.stripeCount; i += 1) {
+    const patch = new THREE.Mesh(new THREE.SphereGeometry(profile.bodyRadius * 0.26, 9, 9), markMat);
+    patch.scale.set(profile.bodyScale.x * 0.68, profile.bodyScale.y * 0.22, profile.bodyScale.z * 0.18);
+    patch.position.set(
+      0,
+      profile.bodyScale.y * (0.08 + i * 0.08),
+      -profile.bodyScale.z * 0.3 + i * profile.bodyScale.z * 0.22
+    );
+    markings.push(patch);
+    rig.add(patch);
+  }
+
+  const snout = new THREE.Mesh(
+    new THREE.ConeGeometry(0.09 + profile.snoutLength * 0.18, profile.snoutLength, 10),
+    underMat
+  );
+  snout.rotation.x = Math.PI / 2;
+  snout.position.set(
+    0,
+    head.position.y - profile.headScale.y * 0.03,
+    head.position.z + profile.headScale.z * 0.44
+  );
+  rig.add(snout);
+
+  const mouth = new THREE.Mesh(
+    new THREE.TorusGeometry(0.065 + profile.snoutLength * 0.09, 0.01, 6, 12, Math.PI),
+    mouthMat
+  );
+  mouth.position.set(0, snout.position.y - 0.02, snout.position.z + profile.snoutLength * 0.26);
+  mouth.rotation.x = Math.PI / 2;
+  rig.add(mouth);
+
+  for (const side of [-1, 1]) {
+    let ornament;
+    if (profile.appendageType === "fin") {
+      ornament = new THREE.Mesh(
+        new THREE.BoxGeometry(profile.earSize * 0.22, profile.earSize * 0.05, profile.earSize * 0.48),
+        ornamentMat
+      );
+      ornament.position.set(side * profile.headScale.x * 0.52, head.position.y + profile.headScale.y * 0.12, head.position.z);
+      ornament.rotation.z = side * Math.PI * 0.2;
+      ornament.rotation.x = Math.PI * 0.12;
+    } else {
+      ornament = new THREE.Mesh(
+        new THREE.ConeGeometry(profile.earSize * 0.16, profile.earSize, 8),
+        ornamentMat
+      );
+      ornament.position.set(
+        side * profile.headScale.x * 0.44,
+        head.position.y + profile.headScale.y * 0.33,
+        head.position.z - profile.headScale.z * 0.06
+      );
+      ornament.rotation.z = side * (-Math.PI * 0.2);
+      ornament.rotation.x = role === "predator" ? Math.PI * 0.24 : Math.PI * 0.08;
+    }
+    ornaments.push({ mesh: ornament, rest: ornament.rotation.clone(), side });
+    rig.add(ornament);
+  }
+
+  if (profile.crestHeight > 0.06) {
+    for (let i = 0; i < 2; i += 1) {
+      const crest = new THREE.Mesh(
+        new THREE.ConeGeometry(0.055 + i * 0.01, profile.crestHeight + i * 0.06, 8),
+        ornamentMat
+      );
+      crest.position.set(0, head.position.y + profile.headScale.y * (0.32 + i * 0.07), head.position.z - i * 0.08);
+      crest.rotation.z = Math.PI;
+      ornaments.push({ mesh: crest, rest: crest.rotation.clone(), side: 0 });
+      rig.add(crest);
+    }
+  }
 
   for (let i = 0; i < profile.appendageCount; i += 1) {
     const ang = (i / profile.appendageCount) * Math.PI * 2;
@@ -674,7 +834,7 @@ function applyPhenotype(mesh, baseColor, profile) {
         new THREE.ConeGeometry(0.08, profile.appendageLength, 8),
         accentMat
       );
-      limb.position.copy(dir.clone().multiplyScalar(profile.bodyScale.x * 0.68));
+      limb.position.copy(dir.clone().multiplyScalar(profile.bodyScale.x * 0.66));
       limb.position.y = y;
       limb.lookAt(limb.position.clone().add(dir));
       limb.rotateX(Math.PI / 2);
@@ -706,29 +866,52 @@ function applyPhenotype(mesh, baseColor, profile) {
     rig.add(spike);
   }
 
-  const tail = new THREE.Mesh(
-    new THREE.ConeGeometry(0.09, profile.tailLength, 9),
-    accentMat
-  );
+  const tail = new THREE.Mesh(new THREE.ConeGeometry(0.09 + profile.tailLength * 0.02, profile.tailLength, 9), accentMat);
   tail.position.set(0, 0, -profile.bodyScale.z * 0.95);
   tail.rotation.x = Math.PI / 2;
   rig.add(tail);
 
   const eyeLeft = new THREE.Mesh(new THREE.SphereGeometry(profile.eyeScale, 10, 10), eyeMat);
   const eyeRight = eyeLeft.clone();
-  eyeLeft.position.set(-profile.bodyScale.x * 0.22, profile.bodyScale.y * 0.14, profile.bodyScale.z * 0.54);
-  eyeRight.position.set(profile.bodyScale.x * 0.22, profile.bodyScale.y * 0.14, profile.bodyScale.z * 0.54);
+  const eyeY = head.position.y + profile.headScale.y * 0.1;
+  const eyeZ = head.position.z + profile.headScale.z * 0.42;
+  eyeLeft.position.set(-profile.eyeSpacing, eyeY, eyeZ);
+  eyeRight.position.set(profile.eyeSpacing, eyeY, eyeZ);
   rig.add(eyeLeft);
   rig.add(eyeRight);
+
+  const pupilLeft = new THREE.Mesh(new THREE.SphereGeometry(profile.eyeScale * 0.45, 8, 8), pupilMat);
+  const pupilRight = pupilLeft.clone();
+  pupilLeft.position.set(-profile.eyeSpacing, eyeY, eyeZ + profile.eyeScale * 0.72);
+  pupilRight.position.set(profile.eyeSpacing, eyeY, eyeZ + profile.eyeScale * 0.72);
+  pupilLeft.userData.basePos = pupilLeft.position.clone();
+  pupilRight.userData.basePos = pupilRight.position.clone();
+  rig.add(pupilLeft);
+  rig.add(pupilRight);
+
+  const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.86, 18), shadowMat);
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.y = -profile.bodyScale.y * 0.62 + 0.02;
+  shadow.scale.set(profile.bodyScale.x * 0.95, profile.bodyScale.z * 0.95, 1);
+  rig.add(shadow);
 
   mesh.add(rig);
   mesh.userData.phenotypeRig = {
     group: rig,
     body,
+    head,
+    snout: { mesh: snout, rest: snout.rotation.clone() },
+    mouth: { mesh: mouth, rest: mouth.rotation.clone() },
     tail: { mesh: tail, rest: tail.rotation.clone() },
+    shadow,
+    eyes: [eyeLeft, eyeRight],
+    pupils: [pupilLeft, pupilRight],
+    ornaments,
+    markings,
     appendages,
     dorsal,
     tintMaterials,
+    tintLayers,
     profile,
     idleSeed: ((profile.seed >>> 0) % 997) / 997,
   };
@@ -751,6 +934,20 @@ function animatePhenotype(mesh, speedNorm, t, dt) {
   if (rig.body) {
     rig.body.rotation.z = Math.sin(phase * 0.4) * (0.02 + speed * (0.08 + cuteMotion * 0.03));
     rig.body.rotation.x = Math.cos(phase * 0.35) * (0.01 + speed * (0.04 + cuteMotion * 0.02));
+  }
+
+  if (rig.head) {
+    rig.head.rotation.y = Math.sin(phase * 0.44) * (0.06 + speed * 0.08);
+    rig.head.rotation.x = Math.cos(phase * 0.36) * (0.03 + speed * 0.05);
+    rig.head.position.y = profile.bodyScale.y * 0.04 + Math.sin(phase * 0.74) * 0.03;
+  }
+
+  if (rig.snout) {
+    rig.snout.mesh.rotation.x = rig.snout.rest.x + Math.cos(phase * 0.52) * (0.02 + speed * 0.04);
+  }
+
+  if (rig.mouth) {
+    rig.mouth.mesh.rotation.z = rig.mouth.rest.z + Math.sin(phase * 0.38) * 0.08;
   }
 
   if (rig.tail) {
@@ -778,6 +975,53 @@ function animatePhenotype(mesh, speedNorm, t, dt) {
   for (const spine of rig.dorsal) {
     spine.mesh.rotation.x = spine.rest.x + Math.sin(phase * 0.5 + spine.phase) * (0.04 + speed * 0.06);
     spine.mesh.rotation.z = spine.rest.z + Math.cos(phase * 0.6 + spine.phase) * 0.04;
+  }
+
+  const blinkPulse = Math.sin(t * 0.87 + rig.idleSeed * 23);
+  const blink = blinkPulse > 0.93 ? clamp((blinkPulse - 0.93) / 0.07, 0, 1) : 0;
+  const eyeOpen = 1 - blink * 0.88;
+  if (rig.eyes) {
+    for (const eye of rig.eyes) {
+      eye.scale.y = eyeOpen;
+      eye.scale.x = 1 + blink * 0.05;
+    }
+  }
+
+  if (rig.pupils) {
+    const gaze = Math.sin(phase * 0.22) * 0.03;
+    for (const pupil of rig.pupils) {
+      const basePos = pupil.userData.basePos;
+      pupil.scale.y = eyeOpen;
+      if (basePos) {
+        pupil.position.x = basePos.x + gaze * 0.42;
+        pupil.position.y = basePos.y + Math.cos(phase * 0.3) * 0.012;
+        pupil.position.z = basePos.z + gaze * 0.28;
+      }
+    }
+  }
+
+  if (rig.ornaments) {
+    for (const ornament of rig.ornaments) {
+      ornament.mesh.rotation.x =
+        ornament.rest.x + Math.cos(phase * 0.6 + ornament.side) * (0.03 + speed * 0.05);
+      ornament.mesh.rotation.z =
+        ornament.rest.z + Math.sin(phase * 0.55 + ornament.side) * 0.04;
+    }
+  }
+
+  if (rig.markings) {
+    for (let i = 0; i < rig.markings.length; i += 1) {
+      const mark = rig.markings[i];
+      mark.scale.y = 1 + Math.sin(phase * 0.42 + i * 0.8) * 0.06;
+    }
+  }
+
+  if (rig.shadow) {
+    const squash = 1 + speed * 0.12;
+    const stretch = 1 - speed * 0.08;
+    rig.shadow.scale.x = profile.bodyScale.x * 0.95 * squash;
+    rig.shadow.scale.y = profile.bodyScale.z * 0.95 * stretch;
+    rig.shadow.material.opacity = 0.21 + speed * 0.06;
   }
 }
 
