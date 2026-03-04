@@ -918,6 +918,19 @@ function mateCompatibilityTier(score) {
   return "fragile";
 }
 
+function mateCompatibilityColor(tier) {
+  if (tier === "ideal") return 0x97f87f;
+  if (tier === "viable") return 0x93d6ff;
+  if (tier === "risky") return 0xffcf8f;
+  return 0xff8f8f;
+}
+
+function tintAdjust(hex, h, s, l) {
+  const color = new THREE.Color(hex);
+  color.offsetHSL(h || 0, s || 0, l || 0);
+  return color.getHex();
+}
+
 function evaluateMateCompatibility(playerTraits, playerDNA, mateTraits, mateDNA) {
   const playerSpecies = speciesFromTraits(playerTraits, playerDNA);
   const mateSpecies = speciesFromTraits(mateTraits, mateDNA);
@@ -3554,7 +3567,7 @@ function renderMateCards() {
       const compatibilityPct = Math.round(compatibility.score * 100);
       const candidateSummary = matePhenotypeDescriptor(candidateProfile, candidateTraits);
       const previewSummary = matePhenotypeDescriptor(previewProfile, previewTraits);
-      const cardClass = `mate-card${isSelected ? " selected" : ""}${eligible ? "" : " locked"}`;
+      const cardClass = `mate-card compat-${compatibility.tier}${isSelected ? " selected" : ""}${eligible ? "" : " locked"}`;
       const badgeClass = `mate-badge${eligible ? "" : " locked"}`;
       const badgeText = eligible ? "eligible" : "locked";
       const buttonText = isSelected ? "Selected" : "Choose";
@@ -4309,13 +4322,17 @@ function updateMatesAndRivals(dt) {
     if (mate.captured) continue;
     mate.pulse += dt * 2.4;
     const eligible = requirementMet(mate.requirement);
+    const compatibility =
+      mate.compatibility ||
+      evaluateMateCompatibility(player.traits, player.phenotypeDNA, mate.traits, mate.phenotypeDNA);
     const isNearestEligible = !!state.nearestEligible && state.nearestEligible.id === mate.id;
     const isNearestAny = !!state.nearestAny && state.nearestAny.id === mate.id;
     const isSelected = !!selectedMate && selectedMate.id === mate.id;
 
     mate.mesh.scale.setScalar(1 + Math.sin(mate.pulse) * (isSelected ? 0.13 : isNearestAny ? 0.11 : 0.07));
-    let tint = eligible ? 0x9cd8ff : 0x5f6f80;
-    if (isSelected) tint = eligible ? 0xc4ecff : 0x8993a1;
+    const compatColor = mateCompatibilityColor(compatibility.tier);
+    let tint = eligible ? compatColor : 0x5f6f80;
+    if (isSelected) tint = eligible ? tintAdjust(compatColor, 0, 0.05, 0.12) : 0x8993a1;
     if (isNearestEligible) tint = 0xb3ff78;
     mate.mesh.material.color.setHex(tint);
     setPhenotypeTint(mate.mesh, tint);
@@ -4329,8 +4346,8 @@ function updateMatesAndRivals(dt) {
         ? isNearestEligible
           ? 0xc6ff87
           : isSelected
-            ? 0xb6e8ff
-            : 0x95dcff
+            ? tintAdjust(compatColor, 0, 0.04, 0.14)
+            : compatColor
         : isSelected
           ? 0xa0acbb
           : 0x728496;
@@ -5259,7 +5276,8 @@ function drawMinimap() {
   for (let i = 0; i < populations.flora.length; i += 3) {
     const f = populations.flora[i];
     if (!f || !f.alive) continue;
-    drawEntity(f.mesh.position.x, f.mesh.position.z, 1.4, "#4ca145", 0.78);
+    const color = f.toxic ? "#cc6d4e" : f.edible === false ? "#a9955f" : "#4ca145";
+    drawEntity(f.mesh.position.x, f.mesh.position.z, 1.4, color, 0.84);
   }
 
   for (let i = 0; i < populations.trees.length; i += 2) {
@@ -5270,17 +5288,29 @@ function drawMinimap() {
 
   for (const prey of populations.prey) {
     if (!prey.alive) continue;
-    drawEntity(prey.mesh.position.x, prey.mesh.position.z, 1.8, "#b7d86d", 0.92);
+    drawEntity(prey.mesh.position.x, prey.mesh.position.z, 1.8, prey.edible === false ? "#8f9ba4" : "#b7d86d", 0.92);
   }
 
   for (const aquatic of populations.aquatic) {
     if (!aquatic.alive) continue;
-    drawEntity(aquatic.mesh.position.x, aquatic.mesh.position.z, 1.7, "#78cbe6", 0.9);
+    drawEntity(
+      aquatic.mesh.position.x,
+      aquatic.mesh.position.z,
+      1.7,
+      aquatic.edible === false ? "#5a8da0" : "#78cbe6",
+      0.9
+    );
   }
 
   for (const avian of populations.avian) {
     if (!avian.alive) continue;
-    drawEntity(avian.mesh.position.x, avian.mesh.position.z, 1.6, "#efcc7f", 0.9);
+    drawEntity(
+      avian.mesh.position.x,
+      avian.mesh.position.z,
+      1.6,
+      avian.edible === false ? "#b8987d" : "#efcc7f",
+      0.9
+    );
   }
 
   for (const pred of populations.predators) {
@@ -5349,7 +5379,7 @@ function drawMinimap() {
     const rivalLegend = isSimpleReproductionMode() ? "" : " | Orange=Rivals";
     ui.mapLegend.textContent = `Map: G | Radius ${range.toFixed(
       0
-    )}m | Ivory=You | Green=trees | Blue=aquatic | Sun=avian | Gold=selected mate | ${mateLegend}${rivalLegend}`;
+    )}m | Ivory=You | Red/Amber=harmful flora | Gray=inedible fauna | Green=trees | Gold=selected mate | ${mateLegend}${rivalLegend}`;
   }
 }
 

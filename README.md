@@ -60,6 +60,7 @@ Open: `http://127.0.0.1:8158`
   - varied flora + fauna species (some edible, some inedible/toxic)
   - tree populations that add terrain structure and movement blocking
   - mate species compatibility tiers (ideal/viable/risky/fragile) that affect lineage fertility
+  - minimap/UI cues for harmful flora and inedible fauna for faster decision-making
 - Terrain now uses procedural texture + elevation, and entities follow surface height.
 - Telemetry shows FPS, populations, lineage events, tone, and biome.
 - Save snapshots persist to browser `localStorage` (`apex_sim_save_v1`) and autosave every 10 seconds.
