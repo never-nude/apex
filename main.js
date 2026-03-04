@@ -33,6 +33,7 @@ const BALANCE = {
     reproductionInteractDistance: 3.4,
     reproductionCooldownAfterFail: 18,
     reproductionCooldownAfterBirth: 12,
+    matingPhaseDurationSeconds: 150,
     offspringStartEnergyRatio: 0.74,
     deathResetEnergyRatio: 0.68,
     energyDrainBase: 0.4,
@@ -235,6 +236,10 @@ let actionMessage = "";
 let actionMessageTimer = 0;
 let selectedMateId = null;
 let mateCardsRenderKey = "";
+const matingPhase = {
+  active: false,
+  timer: 0,
+};
 const telemetry = {
   enabled: true,
   fps: 0,
@@ -1230,42 +1235,61 @@ function ensurePlayerMarker() {
   player.marker = { group, ring, beacon };
 }
 
-function createLabelSprite(text, fg, bg) {
+function createLabelSprite(text, fg, bg, options) {
+  const width = clamp(Math.floor((options && options.width) || 128), 64, 512);
+  const height = clamp(Math.floor((options && options.height) || 64), 32, 256);
+  const inset = clamp(Math.floor((options && options.inset) || 4), 1, Math.floor(Math.min(width, height) * 0.25));
+  const radius = clamp(Math.floor((options && options.radius) || 14), 0, Math.floor(Math.min(width, height) * 0.45));
+  const strokeWidth = clamp(Number((options && options.strokeWidth) || 3), 0, 10);
+  const fontSize = clamp(
+    Math.floor(
+      (options && options.fontSize) ||
+        (text && text.length > 7 ? height * 0.36 : text && text.length > 4 ? height * 0.42 : height * 0.5)
+    ),
+    10,
+    56
+  );
   const canvas = document.createElement("canvas");
-  canvas.width = 128;
-  canvas.height = 64;
+  canvas.width = width;
+  canvas.height = height;
   const ctx = canvas.getContext("2d");
 
-  ctx.clearRect(0, 0, 128, 64);
+  ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = bg || "rgba(8, 26, 22, 0.78)";
-  ctx.strokeStyle = "rgba(199, 236, 222, 0.75)";
-  ctx.lineWidth = 3;
+  ctx.strokeStyle = (options && options.strokeColor) || "rgba(199, 236, 222, 0.75)";
+  ctx.lineWidth = strokeWidth;
+  const bodyX = inset;
+  const bodyY = inset + 2;
+  const bodyW = width - inset * 2;
+  const bodyH = height - (inset + 2) * 2;
   if (typeof ctx.roundRect === "function") {
     ctx.beginPath();
-    ctx.roundRect(4, 6, 120, 52, 14);
+    ctx.roundRect(bodyX, bodyY, bodyW, bodyH, radius);
     ctx.fill();
-    ctx.stroke();
+    if (strokeWidth > 0) ctx.stroke();
   } else {
-    ctx.fillRect(4, 6, 120, 52);
-    ctx.strokeRect(4, 6, 120, 52);
+    ctx.fillRect(bodyX, bodyY, bodyW, bodyH);
+    if (strokeWidth > 0) ctx.strokeRect(bodyX, bodyY, bodyW, bodyH);
   }
 
   ctx.fillStyle = fg || "#eafff3";
-  ctx.font = "700 30px 'Avenir Next', sans-serif";
+  ctx.font = `700 ${fontSize}px 'Avenir Next', sans-serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText(text, 64, 33);
+  ctx.fillText(text, width * 0.5, height * 0.52);
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.minFilter = THREE.LinearFilter;
   texture.magFilter = THREE.LinearFilter;
   const mat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false });
   const sprite = new THREE.Sprite(mat);
-  sprite.scale.set(1.55, 0.78, 1);
+  const scaleX = Number((options && options.scaleX) || 1.55);
+  const scaleY = Number((options && options.scaleY) || 0.78);
+  sprite.scale.set(scaleX, scaleY, 1);
   return sprite;
 }
 
-function createMateMarker(mesh, label) {
+function createMateMarker(mesh, label, keyHint) {
   const group = new THREE.Group();
 
   const ringMaterial = new THREE.MeshBasicMaterial({
@@ -1300,8 +1324,27 @@ function createMateMarker(mesh, label) {
   tag.position.y = 2.65;
   group.add(tag);
 
+  const keyTag = createLabelSprite(
+    `Press ${keyHint || "1"}`,
+    "#fff8db",
+    "rgba(67, 96, 43, 0.9)",
+    { width: 188, height: 56, fontSize: 22, scaleX: 2.15, scaleY: 0.72, radius: 12, strokeColor: "rgba(236, 242, 171, 0.85)" }
+  );
+  keyTag.position.y = 3.37;
+  group.add(keyTag);
+
+  const actionTag = createLabelSprite(
+    "Press E",
+    "#fefdd5",
+    "rgba(132, 122, 48, 0.92)",
+    { width: 168, height: 56, fontSize: 22, scaleX: 1.95, scaleY: 0.7, radius: 12, strokeColor: "rgba(248, 234, 150, 0.84)" }
+  );
+  actionTag.position.y = 4.02;
+  actionTag.visible = false;
+  group.add(actionTag);
+
   mesh.add(group);
-  return { group, ring, beam, tip, tag, ringMaterial, beamMaterial, tipMaterial };
+  return { group, ring, beam, tip, tag, keyTag, actionTag, ringMaterial, beamMaterial, tipMaterial };
 }
 
 function createRivalMarker(mesh, label) {
@@ -1549,6 +1592,8 @@ function initPlayerLifecycle(startEnergyRatio) {
   player.morphRefreshTimer = 0;
   player.metrics = resetMetrics();
   player.mesh.position.copy(player.pos);
+  matingPhase.active = false;
+  matingPhase.timer = 0;
 }
 
 function storageSupported() {
@@ -1684,6 +1729,8 @@ function loadSnapshot() {
   ACTIVE_THREATS.clear();
   clearGroup(populations.mates);
   clearGroup(populations.rivals);
+  matingPhase.active = false;
+  matingPhase.timer = 0;
 
   saveState.loadedFromDisk = true;
   saveState.lastSavedAt = Number(parsed.savedAt) || 0;
@@ -1962,7 +2009,7 @@ function spawnMateCluster() {
       requirement,
       captured: false,
       heightOffset: 1.2,
-      marker: createMateMarker(mesh, `M${i + 1}`),
+      marker: createMateMarker(mesh, `M${i + 1}`, `${i + 1}`),
     });
     applyPhenotype(mesh, 0x9cd8ff, phenotypeProfile);
   }
@@ -2099,6 +2146,8 @@ function requirementText(req) {
 function reproductionActionState() {
   const simpleMode = isSimpleReproductionMode();
   const req = reproductionThresholds();
+  const phaseOn = matingPhase.active && matingPhase.timer > 0;
+  const phaseText = phaseOn ? ` | mating window ${Math.ceil(matingPhase.timer)}s` : "";
   const missing = [];
   if (!req.readyAge) missing.push(`age ${player.age.toFixed(0)}/${req.ageMin.toFixed(0)}`);
   if (!req.readyEnergy) missing.push(`energy ${player.energy.toFixed(0)}/${req.energyMin.toFixed(0)}`);
@@ -2107,7 +2156,7 @@ function reproductionActionState() {
   if (missing.length > 0) {
     return {
       step: "0/3",
-      text: `Build readiness: ${missing.join(" | ")}`,
+      text: `Build readiness: ${missing.join(" | ")}${phaseText}`,
     };
   }
 
@@ -2125,8 +2174,8 @@ function reproductionActionState() {
     return {
       step: simpleMode ? "1/2" : "1/3",
       text: simpleMode
-        ? "No mate selected. Choose one from the mate cards."
-        : "No mate selected. Choose one from the mate cards or use 1/2/Q/R.",
+        ? "No mate selected. Press the number shown above a mate (1/2/3) or click a mate card."
+        : "No mate selected. Press the number shown above a mate or use Q/R.",
     };
   }
 
@@ -2145,7 +2194,7 @@ function reproductionActionState() {
     return {
       step: simpleMode ? "2/2" : "2/3",
       text: simpleMode
-        ? `Mate nearby. Move closer (${dist.toFixed(1)}m / ${BALANCE.player.reproductionInteractDistance.toFixed(1)}m).`
+        ? `Mate nearby. Move closer (${dist.toFixed(1)}m / ${BALANCE.player.reproductionInteractDistance.toFixed(1)}m), then press E.`
         : `M${selectedMate.slot} eligible. Move closer (${dist.toFixed(1)}m / ${BALANCE.player.reproductionInteractDistance.toFixed(1)}m).`,
     };
   }
@@ -2252,7 +2301,7 @@ function selectMateById(id, silent) {
       selectedMateId = mate.id;
       if (!silent) {
         const summary = matePhenotypeDescriptor(mate.phenotypeProfile, mate.traits);
-        setActionMessage(`Mate M${mate.slot} selected: ${summary}.`, 2.1);
+        setActionMessage(`Mate M${mate.slot} selected: ${summary}. Move close, then press E.`, 2.2);
       }
       return true;
     }
@@ -2283,7 +2332,15 @@ function cycleMateSelection(dir) {
 }
 
 function matingButtonText() {
+  const phaseOn = matingPhase.active && matingPhase.timer > 0;
+  const secondsLeft = Math.max(0, Math.ceil(matingPhase.timer));
   const req = reproductionThresholds();
+  if (phaseOn) {
+    if (req.readyAge && req.readyEnergy && req.readyHealth && req.readyCooldown) {
+      return `Refresh Mating Call (${secondsLeft}s left)`;
+    }
+    return `Mating Phase Active (${secondsLeft}s)`;
+  }
   if (!(req.readyAge && req.readyEnergy && req.readyHealth && req.readyCooldown)) {
     return "Mating Call (not ready)";
   }
@@ -2299,19 +2356,20 @@ function updateMatingCallButton() {
 
 function renderMateCards() {
   if (!ui.mateCards) return;
-  if (!canReproduce()) {
-    ui.mateCards.innerHTML = "";
-    mateCardsRenderKey = "";
-    return;
-  }
+  const phaseOn = matingPhase.active && matingPhase.timer > 0;
   const ordered = populations.mates
     .filter((mate) => !mate.captured)
     .sort((a, b) => a.slot - b.slot);
   if (ordered.length === 0) {
-    const emptyKey = "empty";
+    const emptyKey = `empty:${phaseOn ? 1 : 0}:${canReproduce() ? 1 : 0}`;
     if (mateCardsRenderKey === emptyKey) return;
     mateCardsRenderKey = emptyKey;
-    ui.mateCards.innerHTML = `<div class="mate-card"><div class="mate-line">No candidates yet. Press <strong>Mating Call</strong> to summon mates.</div></div>`;
+    const message = phaseOn
+      ? "Mating phase is active. Press <strong>Mating Call</strong> to refresh candidates."
+      : canReproduce()
+        ? "No candidates yet. Press <strong>Mating Call</strong> to summon mates."
+        : "Mating is locked until readiness is complete.";
+    ui.mateCards.innerHTML = `<div class="mate-card"><div class="mate-line">${message}</div></div>`;
     return;
   }
 
@@ -2355,6 +2413,7 @@ function renderMateCards() {
           <button class="mate-select" data-mate-select="${mate.id}" type="button">${buttonText}</button>
         </div>
         <div class="mate-line">Phenotype: ${candidateSummary}</div>
+        <div class="mate-line">Select key: press ${mate.slot}</div>
         <div class="mate-line">Genotype pull: ${mateGenePullSummary(mate, 3)}</div>
         <div class="mate-line">Offspring forecast: ${previewSummary}</div>
         <div class="mate-line">Distance ${dist.toFixed(1)}m | Requirement: ${requirementText(mate.requirement)}</div>
@@ -2363,16 +2422,41 @@ function renderMateCards() {
     .join("");
 }
 
+function beginMatingPhase(durationSeconds) {
+  const duration = Math.max(20, Number(durationSeconds) || BALANCE.player.matingPhaseDurationSeconds);
+  matingPhase.active = true;
+  matingPhase.timer = Math.max(matingPhase.timer, duration);
+}
+
+function endMatingPhase(message, silent) {
+  matingPhase.active = false;
+  matingPhase.timer = 0;
+  clearGroup(populations.mates);
+  clearGroup(populations.rivals);
+  updateMateLockVisual(null, null);
+  if (!silent && message) setActionMessage(message, 2.6);
+}
+
+function updateMatingPhase(dt) {
+  if (!matingPhase.active) return;
+  matingPhase.timer = Math.max(0, matingPhase.timer - dt);
+  if (matingPhase.timer <= 0) {
+    endMatingPhase("Mating phase ended. Press Mating Call to start another window.", false);
+  }
+}
+
 function triggerMatingCall() {
   const req = reproductionThresholds();
   if (!(req.readyAge && req.readyEnergy && req.readyHealth && req.readyCooldown)) {
     setActionMessage("Mating call unavailable until reproduction readiness is complete.", 2.4);
     return false;
   }
+  beginMatingPhase(BALANCE.player.matingPhaseDurationSeconds);
   spawnMateCluster();
   const count = populations.mates.length;
+  const secondsLeft = Math.max(0, Math.ceil(matingPhase.timer));
   setActionMessage(
-    `Mating call sent. ${count} candidate${count === 1 ? "" : "s"} arrived. Choose a mate card by phenotype, move close, then press E.`,
+    `Mating call sent. ${count} candidate${count === 1 ? "" : "s"} arrived (${secondsLeft}s window). Press the number shown above a mate, move close, then press E.`,
     3.6
   );
   mateCardsRenderKey = "";
@@ -2407,7 +2491,7 @@ function nearestMateState() {
 
 function updateMateLockVisual(state, selectedMate) {
   if (!mateLockVisual) return;
-  if (!canReproduce() || !state) {
+  if (!(matingPhase.active && matingPhase.timer > 0) || !state) {
     mateLockVisual.group.visible = false;
     return;
   }
@@ -2771,9 +2855,15 @@ function updatePredators(dt) {
 
 function updateMatesAndRivals(dt) {
   const tone = toneProfile();
-  if (!canReproduce()) {
-    clearGroup(populations.mates);
-    clearGroup(populations.rivals);
+  const phaseOn = matingPhase.active && matingPhase.timer > 0;
+  if (!phaseOn) {
+    if (populations.mates.length > 0) clearGroup(populations.mates);
+    if (populations.rivals.length > 0) clearGroup(populations.rivals);
+    updateMateLockVisual(null, null);
+    return;
+  }
+
+  if (populations.mates.length === 0) {
     updateMateLockVisual(null, null);
     return;
   }
@@ -2819,6 +2909,22 @@ function updateMatesAndRivals(dt) {
       mate.marker.tag.material.opacity = isSelected || isNearestAny ? 1 : 0.9;
       const tagScale = isSelected ? 1.2 : isNearestAny ? 1.12 : 1;
       mate.marker.tag.scale.set(1.55 * tagScale, 0.78 * tagScale, 1);
+      if (mate.marker.keyTag) {
+        const keyPulse = 1 + Math.sin(mate.pulse * 1.9 + mate.id * 0.17) * 0.03;
+        const keyScale = (isSelected ? 1.07 : isNearestAny ? 1.02 : 1) * keyPulse;
+        mate.marker.keyTag.position.y = 3.37 + Math.sin(mate.pulse * 1.3) * 0.04;
+        mate.marker.keyTag.scale.set(2.15 * keyScale, 0.72 * keyScale, 1);
+        mate.marker.keyTag.material.opacity = isSelected ? 1 : isNearestAny ? 0.96 : 0.9;
+      }
+      if (mate.marker.actionTag) {
+        const dist = mate.mesh.position.distanceTo(player.mesh.position);
+        const showAction = isSelected && eligible && dist <= BALANCE.player.reproductionInteractDistance;
+        mate.marker.actionTag.visible = showAction;
+        if (showAction) {
+          mate.marker.actionTag.position.y = 4.02 + Math.sin(mate.pulse * 2.1) * 0.06;
+          mate.marker.actionTag.material.opacity = 0.96;
+        }
+      }
       mate.marker.group.rotation.y += dt * 0.7;
     }
 
@@ -3105,7 +3211,7 @@ function tryReproduce() {
   if (!selectedMate) {
     setActionMessage(
       simpleMode
-        ? "No mate selected. Choose a candidate card, then move close and press E."
+        ? "No mate selected. Press the number shown above a mate (1/2/3), then move close and press E."
         : "No mate selected. Choose one from mate cards or use 1/2/Q/R.",
       2.0
     );
@@ -3168,14 +3274,17 @@ function hudText() {
   const lineageLen = player.lineage.length;
   const req = reproductionThresholds();
   const reproAction = reproductionActionState();
+  const phaseOn = matingPhase.active && matingPhase.timer > 0;
+  const phaseSeconds = Math.max(0, Math.ceil(matingPhase.timer));
 
   ui.lineage.textContent =
     `Generation ${player.generation} | Lineage entries ${lineageLen} | World tier ${WORLD.tier}`;
   const predatorMode = BALANCE.gameplay.predatorsEnabled ? "Predators on" : "Predators off";
+  const matingState = phaseOn ? `Mating phase ${phaseSeconds}s` : "Mating phase off";
   ui.status.textContent =
     `Energy ${energy}/${energyMax} | Health ${player.health.toFixed(0)} | Age ${player.age.toFixed(
       0
-    )} | Biome ${biomeName} | Reproduction ${ready} | Tone ${tone.label} | ${predatorMode}`;
+    )} | Biome ${biomeName} | Reproduction ${ready} | ${matingState} | Tone ${tone.label} | ${predatorMode}`;
   if (ui.repro) {
     const ageState = req.readyAge ? "OK" : "WAIT";
     const energyState = req.readyEnergy ? "OK" : "WAIT";
@@ -3202,16 +3311,18 @@ function hudText() {
 
   if (ui.mateInfo) {
     let mateInfoLine = "Mating unavailable: complete readiness requirements first.";
-    if (canReproduce()) {
+    if (phaseOn) {
       if (populations.mates.length === 0) {
-        mateInfoLine = "Press Mating Call (button or E), then pick a mate card by phenotype/genotype.";
+        mateInfoLine = `Mating phase active (${phaseSeconds}s left). Press Mating Call to refresh candidates.`;
       } else {
         const selectedMate = ensureSelectedMate();
         const selectedText = selectedMate
           ? `M${selectedMate.slot} ${matePhenotypeDescriptor(selectedMate.phenotypeProfile, selectedMate.traits)}`
           : "none";
-        mateInfoLine = `Selected mate: ${selectedText} | Press E when in range to reproduce.`;
+        mateInfoLine = `Mating phase active (${phaseSeconds}s) | Selected: ${selectedText} | Use keys above mates (1/2/3), then press E in range.`;
       }
+    } else if (canReproduce()) {
+      mateInfoLine = "Press Mating Call (button or E), then choose a mate by phenotype/genotype.";
     }
     ui.mateInfo.textContent = mateInfoLine;
   }
@@ -3258,7 +3369,7 @@ function hudText() {
 
   if (ui.hint) {
     ui.hint.textContent =
-      "Move: WASD + Arrow steer (Up/Down throttle, Left/Right turn) | Focus: F | Map: G | Mating Call: button/E | Select mate: card click (or 1/2/3/Q/R) | Reproduce: E in range | Tone: M | Predators: P | Telemetry: T | Save: K | Load: L | New: N | Debug: Tab | Pan: Shift+Drag";
+      "Move: WASD + Arrow steer (Up/Down throttle, Left/Right turn) | Focus: F | Map: G | Mating Call: button/E (150s window) | Select mate: press number shown above each mate (or click card) | Reproduce: press E when close | Tone: M | Predators: P | Telemetry: T | Save: K | Load: L | New: N | Debug: Tab | Pan: Shift+Drag";
   }
 }
 
@@ -3747,6 +3858,7 @@ function frame() {
   updateFlora(dt);
   updatePrey(dt);
   updatePredators(dt);
+  updateMatingPhase(dt);
   updateMatesAndRivals(dt);
   updatePlayerMorphology(dt);
   tryDeathReset();
