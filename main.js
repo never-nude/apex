@@ -2,7 +2,7 @@
 
 const BALANCE = {
   gameplay: {
-    predatorsEnabled: false,
+    predatorsEnabled: true,
   },
   world: {
     baseRadius: 80,
@@ -235,6 +235,20 @@ function cycleToneProfile() {
   refreshPlayerPhenotype(true);
   setActionMessage(`Tone mode: ${toneProfile().label}`, 2.4);
   saveSnapshot("tone-change");
+}
+
+function setPredatorMode(enabled, reason, silent) {
+  BALANCE.gameplay.predatorsEnabled = !!enabled;
+  ACTIVE_THREATS.clear();
+  syncPopulation();
+  if (!silent) {
+    setActionMessage(`Predators ${BALANCE.gameplay.predatorsEnabled ? "enabled" : "disabled"}.`, 1.8);
+  }
+  if (reason) saveSnapshot(reason);
+}
+
+function togglePredatorMode() {
+  setPredatorMode(!BALANCE.gameplay.predatorsEnabled, "predator-toggle", false);
 }
 
 const scene = new THREE.Scene();
@@ -1147,6 +1161,9 @@ function saveSnapshot(reason) {
     schema: BALANCE.save.schema,
     savedAt: Date.now(),
     reason,
+    gameplay: {
+      predatorsEnabled: BALANCE.gameplay.predatorsEnabled,
+    },
     toneIndex: toneState.index,
     telemetry: {
       births: telemetry.births,
@@ -1213,6 +1230,9 @@ function loadSnapshot() {
 
   const nextToneIndex = Number(parsed.toneIndex);
   if (Number.isFinite(nextToneIndex)) setToneIndex(nextToneIndex);
+  if (parsed.gameplay && typeof parsed.gameplay.predatorsEnabled === "boolean") {
+    BALANCE.gameplay.predatorsEnabled = parsed.gameplay.predatorsEnabled;
+  }
   if (parsed.telemetry) {
     telemetry.births = clamp(Number(parsed.telemetry.births) || 0, 0, 999999);
     telemetry.deaths = clamp(Number(parsed.telemetry.deaths) || 0, 0, 999999);
@@ -2404,7 +2424,7 @@ function hudText() {
 
   if (ui.hint) {
     ui.hint.textContent =
-      "Move: WASD + Arrow steer (Up/Down throttle, Left/Right turn) | Focus: F | Map: G | Reproduce: E | Tone: M | Telemetry: T | Save: K | Load: L | New: N | Debug: Tab | Pan: Shift+Drag | Mate markers: M1/M2 cyan-green | Rival markers: R1/R2 orange | Mate lock beam: active when reproduction-ready";
+      "Move: WASD + Arrow steer (Up/Down throttle, Left/Right turn) | Focus: F | Map: G | Reproduce: E | Tone: M | Predators: P | Telemetry: T | Save: K | Load: L | New: N | Debug: Tab | Pan: Shift+Drag | Mate markers: M1/M2 cyan-green | Rival markers: R1/R2 orange | Mate lock beam: active when reproduction-ready";
   }
 }
 
@@ -2652,6 +2672,7 @@ window.addEventListener("keydown", (e) => {
     setActionMessage(`Map ${mapState.enabled ? "shown" : "hidden"}.`, 1.6);
   }
   if (e.code === "KeyM") cycleToneProfile();
+  if (e.code === "KeyP") togglePredatorMode();
   if (e.code === "KeyT") {
     telemetry.enabled = !telemetry.enabled;
     setActionMessage(`Telemetry ${telemetry.enabled ? "enabled" : "hidden"}.`, 1.8);

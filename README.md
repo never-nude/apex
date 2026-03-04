@@ -12,7 +12,7 @@ Minimal playable prototype aligned with the Apex ecosystem vision:
 - Phenotype rigs are animated from locomotion speed (gait, tail sway, idle motion).
 - Player morphology now updates live during a generation from behavior telemetry.
 - Prey use flocking rules (alignment/cohesion/separation), and predators use light pack-hunt coordination.
-- Predator pressure is temporarily disabled by default to focus on mating/evolution iteration (`BALANCE.gameplay.predatorsEnabled = false`).
+- Predators are enabled by default; press `P` in-game to toggle predator pressure on/off.
 
 ## Run
 
@@ -27,6 +27,7 @@ Open: `http://127.0.0.1:8158`
 
 - `W A S D`: Camera-relative movement
 - `Arrow keys`: Steering controls (`Up/Down` throttle, `Left/Right` turn)
+- `P`: Toggle predators on/off (for focused tuning sessions)
 - `F`: Focus camera on player organism
 - `G`: Toggle minimap/radar
 - Mouse drag: Orbit camera
