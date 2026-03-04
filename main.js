@@ -1,6 +1,9 @@
 "use strict";
 
 const BALANCE = {
+  gameplay: {
+    predatorsEnabled: false,
+  },
   world: {
     baseRadius: 80,
     radiusPerTier: 28,
@@ -1407,6 +1410,15 @@ function clearGroup(group) {
   }
 }
 
+function trimGroupToTarget(group, targetCount) {
+  while (group.length > targetCount) {
+    const entity = group.pop();
+    if (!entity || !entity.mesh) continue;
+    scene.remove(entity.mesh);
+    disposeMeshTree(entity.mesh);
+  }
+}
+
 function spawnMateCluster() {
   clearGroup(populations.mates);
   clearGroup(populations.rivals);
@@ -1524,13 +1536,17 @@ function desiredPopulation() {
   return {
     flora: BALANCE.populations.floraBase + WORLD.tier * BALANCE.populations.floraPerTier,
     prey: BALANCE.populations.preyBase + WORLD.tier * BALANCE.populations.preyPerTier,
-    predators:
-      BALANCE.populations.predatorBase + WORLD.tier * BALANCE.populations.predatorPerTier,
+    predators: BALANCE.gameplay.predatorsEnabled
+      ? BALANCE.populations.predatorBase + WORLD.tier * BALANCE.populations.predatorPerTier
+      : 0,
   };
 }
 
 function syncPopulation() {
   const target = desiredPopulation();
+  trimGroupToTarget(populations.flora, target.flora);
+  trimGroupToTarget(populations.prey, target.prey);
+  trimGroupToTarget(populations.predators, target.predators);
   while (populations.flora.length < target.flora) spawnFlora();
   while (populations.prey.length < target.prey) spawnPrey();
   while (populations.predators.length < target.predators) spawnPredator();
@@ -1838,6 +1854,12 @@ function updatePrey(dt) {
 }
 
 function updatePredators(dt) {
+  if (!BALANCE.gameplay.predatorsEnabled) {
+    if (populations.predators.length > 0) clearGroup(populations.predators);
+    ACTIVE_THREATS.clear();
+    return;
+  }
+
   for (const pred of populations.predators) {
     const pos = pred.mesh.position;
     let target = null;
@@ -2298,10 +2320,11 @@ function hudText() {
 
   ui.lineage.textContent =
     `Generation ${player.generation} | Lineage entries ${lineageLen} | World tier ${WORLD.tier}`;
+  const predatorMode = BALANCE.gameplay.predatorsEnabled ? "Predators on" : "Predators off";
   ui.status.textContent =
     `Energy ${energy}/${energyMax} | Health ${player.health.toFixed(0)} | Age ${player.age.toFixed(
       0
-    )} | Biome ${biome} | Reproduction ${ready} | Tone ${tone.label}`;
+    )} | Biome ${biome} | Reproduction ${ready} | Tone ${tone.label} | ${predatorMode}`;
   if (ui.repro) {
     let reproLine = "Reproduction: not ready yet.";
     if (canReproduce()) {

@@ -12,6 +12,7 @@ Minimal playable prototype aligned with the Apex ecosystem vision:
 - Phenotype rigs are animated from locomotion speed (gait, tail sway, idle motion).
 - Player morphology now updates live during a generation from behavior telemetry.
 - Prey use flocking rules (alignment/cohesion/separation), and predators use light pack-hunt coordination.
+- Predator pressure is temporarily disabled by default to focus on mating/evolution iteration (`BALANCE.gameplay.predatorsEnabled = false`).
 
 ## Run
 
