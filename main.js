@@ -378,6 +378,18 @@ const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = false;
+if ("outputColorSpace" in renderer && THREE.SRGBColorSpace) {
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+} else if ("outputEncoding" in renderer && THREE.sRGBEncoding) {
+  renderer.outputEncoding = THREE.sRGBEncoding;
+}
+if ("toneMapping" in renderer && THREE.ACESFilmicToneMapping !== undefined) {
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.04;
+}
+if ("useLegacyLights" in renderer) {
+  renderer.useLegacyLights = false;
+}
 renderer.setClearColor(0xbfe2ff, 1);
 renderer.domElement.id = "viewport";
 document.body.appendChild(renderer.domElement);
@@ -791,6 +803,42 @@ function removePhenotype(mesh) {
   mesh.remove(current.group);
   disposeMeshTree(current.group);
   delete mesh.userData.phenotypeRig;
+}
+
+function applyStylizedCreatureMaterial(material, options) {
+  if (!material) return;
+  const bands = clamp(Number(options && options.bands) || 4, 2, 8);
+  const rimStrength = clamp(Number(options && options.rimStrength) || 0.22, 0, 1.2);
+  const rimColor = new THREE.Color((options && options.rimColor) || 0xf4f7ff);
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.apexRimColor = { value: rimColor };
+    shader.uniforms.apexRimStrength = { value: rimStrength };
+    shader.uniforms.apexShadeBands = { value: bands };
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        "#include <common>",
+        `#include <common>
+uniform vec3 apexRimColor;
+uniform float apexRimStrength;
+uniform float apexShadeBands;`
+      )
+      .replace(
+        "#include <output_fragment>",
+        `
+float apexBands = max(apexShadeBands, 2.0);
+outgoingLight = floor(outgoingLight * apexBands) / apexBands;
+vec3 apexN = normalize(vNormal);
+vec3 apexV = normalize(vViewPosition);
+float apexRim = pow(1.0 - clamp(dot(apexN, apexV), 0.0, 1.0), 1.9);
+outgoingLight += apexRimColor * (apexRim * apexRimStrength);
+#include <output_fragment>
+`
+      );
+  };
+  material.customProgramCacheKey = () => {
+    return `apex-stylized:${bands.toFixed(2)}:${rimStrength.toFixed(3)}:${rimColor.getHexString()}`;
+  };
+  material.needsUpdate = true;
 }
 
 function setPhenotypeTint(mesh, hex) {
@@ -1360,6 +1408,11 @@ function applyPhenotype(mesh, baseColor, profile) {
     markMat.bumpMap = skinMap;
     markMat.bumpScale = 0.008;
   }
+  applyStylizedCreatureMaterial(bodyMat, { bands: 4, rimStrength: 0.26, rimColor: 0xf4f8ff });
+  applyStylizedCreatureMaterial(accentMat, { bands: 4, rimStrength: 0.22, rimColor: 0xeaf2ff });
+  applyStylizedCreatureMaterial(underMat, { bands: 3, rimStrength: 0.18, rimColor: 0xe6ecff });
+  applyStylizedCreatureMaterial(markMat, { bands: 5, rimStrength: 0.14, rimColor: 0xe8f0ff });
+  applyStylizedCreatureMaterial(ornamentMat, { bands: 4, rimStrength: 0.2, rimColor: 0xf3f0ff });
 
   const tintLayers = [
     { material: bodyMat, h: 0, s: 0, l: 0 },
