@@ -41,6 +41,8 @@ const BALANCE = {
     reproductionCooldownAfterBirth: 10,
     matingPhaseDurationSeconds: 150,
     offspringStartEnergyRatio: 0.74,
+    generationMorphSeconds: 4.2,
+    generationMorphStartScale: 0.56,
     deathResetEnergyRatio: 0.68,
     energyDrainBase: 0.31,
     energyDrainMoveScale: 0.5,
@@ -1932,6 +1934,7 @@ const player = {
   morphRefreshTimer: 0,
   burstCooldown: 0,
   burstTimer: 0,
+  generationTransition: null,
   marker: null,
   metrics: resetMetrics(),
 };
@@ -1961,6 +1964,105 @@ function ensurePlayerMarker() {
 
   player.mesh.add(group);
   player.marker = { group, ring, beacon };
+}
+
+function clearGenerationTransition(resetVisual) {
+  const fx = player.generationTransition;
+  if (fx && fx.shell) {
+    player.mesh.remove(fx.shell);
+    if (fx.shell.geometry && typeof fx.shell.geometry.dispose === "function") {
+      fx.shell.geometry.dispose();
+    }
+    disposeMaterial(fx.shell.material);
+  }
+  if (fx && player.mesh.material && player.mesh.material.emissive && fx.baseEmissive) {
+    player.mesh.material.emissive.copy(fx.baseEmissive);
+    player.mesh.material.emissiveIntensity = fx.baseEmissiveIntensity;
+  } else if (resetVisual && player.mesh.material && player.mesh.material.emissive) {
+    player.mesh.material.emissive.setHex(0x174f3f);
+    player.mesh.material.emissiveIntensity = 0.16;
+  }
+  if (resetVisual || fx) {
+    player.mesh.scale.setScalar(1);
+  }
+  player.generationTransition = null;
+}
+
+function startGenerationTransition(compatibilityScore) {
+  clearGenerationTransition(false);
+  const duration = clamp(BALANCE.player.generationMorphSeconds, 1.2, 9);
+  const startScale = clamp(BALANCE.player.generationMorphStartScale, 0.36, 0.9);
+  const score = clamp(Number(compatibilityScore) || 0.62, 0.1, 1);
+  const dna = sanitizePhenotypeDNA(player.phenotypeDNA || DEFAULT_PHENOTYPE_DNA);
+  const glowColor = new THREE.Color(0xfff0cc)
+    .lerp(new THREE.Color(0xd4f6ff), dna.pigment * 0.55)
+    .lerp(new THREE.Color(0xe0ffd0), score * 0.25);
+
+  const shell = new THREE.Mesh(
+    new THREE.IcosahedronGeometry(2.2, 2),
+    new THREE.MeshBasicMaterial({
+      color: glowColor,
+      transparent: true,
+      opacity: 0.62,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    })
+  );
+  shell.position.y = 0.08;
+  shell.scale.setScalar(0.72);
+  shell.renderOrder = 8;
+  player.mesh.add(shell);
+
+  player.mesh.scale.setScalar(startScale);
+  player.generationTransition = {
+    timer: duration,
+    duration,
+    startScale,
+    compatibilityScore: score,
+    shell,
+    glowColor,
+    baseEmissive:
+      player.mesh.material && player.mesh.material.emissive
+        ? player.mesh.material.emissive.clone()
+        : new THREE.Color(0x174f3f),
+    baseEmissiveIntensity:
+      player.mesh.material && Number.isFinite(player.mesh.material.emissiveIntensity)
+        ? player.mesh.material.emissiveIntensity
+        : 0.16,
+    seed: ((player.morphSeed >>> 0) ^ ((player.generation * 131) >>> 0)) >>> 0,
+  };
+}
+
+function updateGenerationTransition(dt) {
+  const fx = player.generationTransition;
+  if (!fx) return;
+
+  fx.timer = Math.max(0, fx.timer - dt);
+  const p = 1 - fx.timer / Math.max(0.001, fx.duration);
+  const settle = 1 - Math.pow(1 - p, 3);
+  const wave = Math.sin(p * Math.PI * 2.6 + fx.seed * 0.001) * (1 - p) * 0.04;
+  const overshoot =
+    Math.sin(Math.min(1, p * 1.22) * Math.PI) * 0.08 * (0.76 + fx.compatibilityScore * 0.38);
+  const scale = clamp(fx.startScale + (1 - fx.startScale) * settle + wave + overshoot, 0.34, 1.28);
+  player.mesh.scale.setScalar(scale);
+
+  if (player.mesh.material && player.mesh.material.emissive) {
+    const pulse = (1 - p) * (0.32 + 0.2 * Math.sin(p * Math.PI * 5 + fx.seed * 0.0007));
+    player.mesh.material.emissive.copy(fx.baseEmissive).lerp(fx.glowColor, clamp(0.18 + pulse, 0, 0.86));
+    player.mesh.material.emissiveIntensity = fx.baseEmissiveIntensity + (1 - p) * 0.36;
+  }
+
+  if (fx.shell && fx.shell.material) {
+    const shellScale = 0.72 + p * (1.48 + fx.compatibilityScore * 0.28);
+    fx.shell.scale.setScalar(shellScale);
+    fx.shell.material.opacity = clamp((1 - p) * (0.58 + fx.compatibilityScore * 0.16), 0, 0.82);
+    fx.shell.rotation.y += dt * (1.4 + (1 - p) * 1.9);
+    fx.shell.rotation.x = Math.sin(simTime * 1.8 + fx.seed * 0.001) * 0.1;
+  }
+
+  if (fx.timer <= 0) {
+    clearGenerationTransition(false);
+  }
 }
 
 function createLabelSprite(text, fg, bg, options) {
@@ -2371,6 +2473,7 @@ function setWorldFromGeneration(generation) {
 }
 
 function initPlayerLifecycle(startEnergyRatio) {
+  clearGenerationTransition(true);
   player.pos.set(0, 0, 0);
   placeAtSurface(player.pos, PLAYER_HEIGHT_OFFSET);
   player.vel.set(0, 0, 0);
@@ -2491,6 +2594,7 @@ function loadSnapshot() {
     const parsedGeneration = clamp(Math.floor(Number(parsed.player && parsed.player.generation) || 1), 1, 9999);
     funState.objectiveChain = Math.max(0, parsedGeneration - 1);
   }
+  clearGenerationTransition(true);
 
   const state = parsed.player;
   player.generation = clamp(Math.floor(Number(state.generation) || 1), 1, 9999);
@@ -5094,6 +5198,7 @@ function nextGeneration(mate) {
     4,
     22
   );
+  startGenerationTransition(compatibilityScore);
 
   clearGroup(populations.mates);
   clearGroup(populations.rivals);
@@ -5154,7 +5259,7 @@ function tryReproduce() {
     evaluateMateCompatibility(player.traits, player.phenotypeDNA, selectedMate.traits, selectedMate.phenotypeDNA);
   nextGeneration(selectedMate);
   setActionMessage(
-    `Reproduction success with M${selectedMate.slot} (${compatibility.tier} match). Offspring bias: ${mateGenePullSummary(selectedMate, 2)}.`,
+    `Reproduction success with M${selectedMate.slot} (${compatibility.tier} match). Metamorphosis started. Offspring bias: ${mateGenePullSummary(selectedMate, 2)}.`,
     3.3
   );
 }
@@ -5187,6 +5292,10 @@ function hudText() {
   const phaseOn = matingPhase.active && matingPhase.timer > 0;
   const phaseSeconds = Math.max(0, Math.ceil(matingPhase.timer));
   const comboText = funState.comboCount > 1 ? ` | Combo x${funState.comboCount}` : "";
+  const morphText =
+    player.generationTransition && player.generationTransition.timer > 0
+      ? ` | Metamorphosis ${Math.ceil(player.generationTransition.timer)}s`
+      : "";
   const fertilityPct = Math.round(req.fertility * 100);
 
   ui.lineage.textContent =
@@ -5196,7 +5305,7 @@ function hudText() {
   ui.status.textContent =
     `Energy ${energy}/${energyMax} | Health ${player.health.toFixed(0)} | Age ${player.age.toFixed(
       0
-    )} | Biome ${biomeName} | Fertility ${fertilityPct}% | Reproduction ${ready}${comboText} | ${matingState} | Tone ${tone.label} | ${predatorMode}`;
+    )} | Biome ${biomeName} | Fertility ${fertilityPct}% | Reproduction ${ready}${comboText}${morphText} | ${matingState} | Tone ${tone.label} | ${predatorMode}`;
   if (ui.repro) {
     const ageState = req.readyAge ? "OK" : "WAIT";
     const energyState = req.readyEnergy ? "OK" : "WAIT";
@@ -5828,6 +5937,7 @@ function frame() {
   updateMatesAndRivals(dt);
   updateFunLoop(dt);
   updatePlayerMorphology(dt);
+  updateGenerationTransition(dt);
   tryDeathReset();
   syncPopulation();
 
