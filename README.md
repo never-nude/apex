@@ -79,6 +79,7 @@ Open: `http://127.0.0.1:8158`
 - Creature presentation now adds cached procedural skin textures (stripes/spots/rosettes/bands) and stronger per-organism silhouette asymmetry.
 - Creature materials now use stylized toon-like shading bands + rim-light accents for clearer Zelda-like readability.
 - Generation handoff now has a visible metamorphosis transition (growth + glow cocoon) so evolution reads clearly in play.
+- Rendering now applies species-aware material presets (aquatic/avian/predator/mate) for more distinct surface response and highlights.
 - Mates can have requirements (forage/chase/energy), and rivals can steal mates.
 - World/biome pass now emulates mixed terrain profiles inspired by places like New Zealand and Costa Rica:
   - Coastal beaches and lowlands

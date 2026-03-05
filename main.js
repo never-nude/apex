@@ -843,6 +843,77 @@ outgoingLight += apexRimColor * (apexRim * apexRimStrength);
   material.needsUpdate = true;
 }
 
+function creatureRenderPreset(profile) {
+  const role = (profile && profile.role) || "neutral";
+  const dna = sanitizePhenotypeDNA(profile && profile.dna);
+  const patternType = (profile && profile.patternType) || "stripes";
+  const aquatic = role === "aquatic" || ((profile && profile.appendageType) === "fin" && dna.tail > 0.58);
+  const avian = role === "avian";
+  const predator = role === "predator" || role === "rival";
+  const mate = role === "mate";
+
+  const preset = {
+    bodyRoughness: 0.58,
+    bodyMetalness: 0.12,
+    accentRoughness: 0.48,
+    accentMetalness: 0.17,
+    underRoughness: 0.62,
+    underMetalness: 0.08,
+    bodyBands: 4,
+    accentBands: 4,
+    underBands: 3,
+    markBands: patternType === "rosette" ? 6 : 5,
+    ornamentBands: 4,
+    bodyRim: 0.26,
+    accentRim: 0.22,
+    underRim: 0.18,
+    markRim: 0.14,
+    ornamentRim: 0.2,
+    rimColor: 0xf4f8ff,
+  };
+
+  if (aquatic) {
+    preset.bodyRoughness = 0.42;
+    preset.accentRoughness = 0.35;
+    preset.underRoughness = 0.46;
+    preset.bodyMetalness = 0.16;
+    preset.accentMetalness = 0.22;
+    preset.bodyBands = 5;
+    preset.accentBands = 5;
+    preset.bodyRim = 0.32;
+    preset.accentRim = 0.28;
+    preset.rimColor = 0xd8f2ff;
+  } else if (avian) {
+    preset.bodyRoughness = 0.49;
+    preset.accentRoughness = 0.4;
+    preset.bodyBands = 5;
+    preset.markBands = Math.max(preset.markBands, 6);
+    preset.bodyRim = 0.3;
+    preset.ornamentRim = 0.26;
+    preset.rimColor = 0xfff2d9;
+  } else if (predator) {
+    preset.bodyRoughness = 0.55;
+    preset.accentRoughness = 0.43;
+    preset.bodyMetalness = 0.2;
+    preset.accentMetalness = 0.26;
+    preset.bodyBands = 3;
+    preset.accentBands = 4;
+    preset.bodyRim = 0.24;
+    preset.accentRim = 0.2;
+    preset.rimColor = 0xffe0cd;
+  } else if (mate) {
+    preset.bodyRoughness = 0.52;
+    preset.accentRoughness = 0.42;
+    preset.bodyBands = 5;
+    preset.markBands = Math.max(preset.markBands, 6);
+    preset.bodyRim = 0.34;
+    preset.accentRim = 0.28;
+    preset.rimColor = 0xe7f5ff;
+  }
+
+  return preset;
+}
+
 function setPhenotypeTint(mesh, hex) {
   const rig = mesh.userData.phenotypeRig;
   if (!rig) return;
@@ -1346,20 +1417,21 @@ function applyPhenotype(mesh, baseColor, profile) {
   mesh.material.opacity = 0.035;
 
   const role = profile.role || "neutral";
+  const renderPreset = creatureRenderPreset(profile);
   const bodyMat = new THREE.MeshStandardMaterial({
     color: baseColor,
-    roughness: 0.62,
-    metalness: 0.12,
+    roughness: renderPreset.bodyRoughness,
+    metalness: renderPreset.bodyMetalness,
   });
   const accentMat = new THREE.MeshStandardMaterial({
     color: new THREE.Color(baseColor).offsetHSL(0.04, 0.05, 0.12),
-    roughness: 0.5,
-    metalness: 0.17,
+    roughness: renderPreset.accentRoughness,
+    metalness: renderPreset.accentMetalness,
   });
   const underMat = new THREE.MeshStandardMaterial({
     color: new THREE.Color(baseColor).offsetHSL(0, -0.08, 0.2),
-    roughness: 0.66,
-    metalness: 0.08,
+    roughness: renderPreset.underRoughness,
+    metalness: renderPreset.underMetalness,
   });
   const markMat = new THREE.MeshStandardMaterial({
     color: new THREE.Color(baseColor).offsetHSL(-0.03, 0.1, -0.12),
@@ -1394,27 +1466,47 @@ function applyPhenotype(mesh, baseColor, profile) {
     bodyMat.map = skinMap;
     bodyMat.bumpMap = skinMap;
     bodyMat.bumpScale = 0.012;
-    bodyMat.roughness = 0.58;
+    bodyMat.roughness = renderPreset.bodyRoughness;
 
     accentMat.map = skinMap;
     accentMat.bumpMap = skinMap;
     accentMat.bumpScale = 0.016;
-    accentMat.roughness = 0.48;
+    accentMat.roughness = renderPreset.accentRoughness;
 
     underMat.map = skinMap;
     underMat.bumpMap = skinMap;
     underMat.bumpScale = 0.01;
-    underMat.roughness = 0.62;
+    underMat.roughness = renderPreset.underRoughness;
 
     markMat.map = skinMap;
     markMat.bumpMap = skinMap;
     markMat.bumpScale = 0.008;
   }
-  applyStylizedCreatureMaterial(bodyMat, { bands: 4, rimStrength: 0.26, rimColor: 0xf4f8ff });
-  applyStylizedCreatureMaterial(accentMat, { bands: 4, rimStrength: 0.22, rimColor: 0xeaf2ff });
-  applyStylizedCreatureMaterial(underMat, { bands: 3, rimStrength: 0.18, rimColor: 0xe6ecff });
-  applyStylizedCreatureMaterial(markMat, { bands: 5, rimStrength: 0.14, rimColor: 0xe8f0ff });
-  applyStylizedCreatureMaterial(ornamentMat, { bands: 4, rimStrength: 0.2, rimColor: 0xf3f0ff });
+  applyStylizedCreatureMaterial(bodyMat, {
+    bands: renderPreset.bodyBands,
+    rimStrength: renderPreset.bodyRim,
+    rimColor: renderPreset.rimColor,
+  });
+  applyStylizedCreatureMaterial(accentMat, {
+    bands: renderPreset.accentBands,
+    rimStrength: renderPreset.accentRim,
+    rimColor: renderPreset.rimColor,
+  });
+  applyStylizedCreatureMaterial(underMat, {
+    bands: renderPreset.underBands,
+    rimStrength: renderPreset.underRim,
+    rimColor: renderPreset.rimColor,
+  });
+  applyStylizedCreatureMaterial(markMat, {
+    bands: renderPreset.markBands,
+    rimStrength: renderPreset.markRim,
+    rimColor: renderPreset.rimColor,
+  });
+  applyStylizedCreatureMaterial(ornamentMat, {
+    bands: renderPreset.ornamentBands,
+    rimStrength: renderPreset.ornamentRim,
+    rimColor: renderPreset.rimColor,
+  });
 
   const tintLayers = [
     { material: bodyMat, h: 0, s: 0, l: 0 },
