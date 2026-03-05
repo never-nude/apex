@@ -1031,6 +1031,20 @@ function makePhenotypeProfile(opts) {
     clamp(headScale.y * (0.8 + dna.mass * 0.26), 0.4, 1.38),
     clamp(headScale.z * (0.8 + dna.cranial * 0.56), 0.4, 1.5)
   );
+  let lobeCount = clamp(
+    Math.round(2 + dna.frame * 2 + dna.pattern * 1.6 + next() * 2),
+    1,
+    5
+  );
+  const asymmetry = clamp(
+    (Math.abs(dna.pigment - 0.5) * 1.6 + next() * 0.45) * (0.84 + (1 - cute) * 0.2),
+    0,
+    1
+  );
+  const stripeJitter = clamp(0.08 + dna.pattern * 0.2 + next() * 0.14, 0.06, 0.36);
+  const cheekPuff = clamp(0.14 + dna.mass * 0.48 + dna.pattern * 0.16 + next() * 0.1, 0.08, 0.8);
+  const tailSegments = clamp(Math.round(2 + dna.tail * 4 + next() * 2), 2, 8);
+  const ornamentSpread = clamp(0.72 + dna.cranial * 0.48 + next() * 0.2, 0.72, 1.5);
 
   if (role === "player" && generation > 1) {
     const heritageBias = clamp((heritage.stamina + heritage.speed + heritage.carnivore) / 3, 0, 1);
@@ -1072,6 +1086,11 @@ function makePhenotypeProfile(opts) {
       1,
       6
     );
+    lobeCount = clamp(
+      Math.round(lobeCount + generationProgress * (1 + heritage.social * 0.9)),
+      2,
+      6
+    );
     bodyRadius = clamp(bodyRadius + generationProgress * 0.08, 0.7, 0.95);
   }
 
@@ -1095,6 +1114,12 @@ function makePhenotypeProfile(opts) {
     headScale,
     bodyScale,
     bodyRadius,
+    lobeCount,
+    asymmetry,
+    stripeJitter,
+    cheekPuff,
+    tailSegments,
+    ornamentSpread,
   };
 }
 
@@ -1157,14 +1182,38 @@ function applyPhenotype(mesh, baseColor, profile) {
   ];
   const tintMaterials = [bodyMat, accentMat, underMat, markMat, ornamentMat];
   const rig = new THREE.Group();
+  const profileRand = seeded((profile.seed >>> 0) ^ 0x6a09e667);
   const appendages = [];
   const dorsal = [];
   const ornaments = [];
   const markings = [];
+  const bodyLobes = [];
 
   const body = new THREE.Mesh(new THREE.SphereGeometry(profile.bodyRadius, 16, 16), bodyMat);
   body.scale.copy(profile.bodyScale);
   rig.add(body);
+
+  const lobeCount = clamp(Math.round(profile.lobeCount || 1), 1, 6);
+  for (let i = 0; i < lobeCount; i += 1) {
+    const f = lobeCount === 1 ? 0.5 : i / (lobeCount - 1);
+    const sideSign = i % 2 === 0 ? -1 : 1;
+    const bulge = Math.sin(f * Math.PI);
+    const lobeRadius = clamp(profile.bodyRadius * (0.28 + bulge * 0.34 + profileRand() * 0.12), 0.18, 0.7);
+    const lobe = new THREE.Mesh(new THREE.SphereGeometry(lobeRadius, 11, 11), i % 2 === 0 ? accentMat : underMat);
+    lobe.scale.set(
+      clamp(profile.bodyScale.x * (0.44 + bulge * 0.16 + profileRand() * 0.06), 0.22, 1.8),
+      clamp(profile.bodyScale.y * (0.24 + bulge * 0.1 + profileRand() * 0.06), 0.18, 1.6),
+      clamp(profile.bodyScale.z * (0.16 + bulge * 0.14 + profileRand() * 0.06), 0.12, 1.45)
+    );
+    const lobeX = sideSign * profile.bodyScale.x * (0.06 + (profile.asymmetry || 0) * (0.02 + profileRand() * 0.04));
+    const lobeY = -profile.bodyScale.y * 0.13 + bulge * profile.bodyScale.y * 0.09;
+    const lobeZ = -profile.bodyScale.z * 0.32 + f * profile.bodyScale.z * 0.68;
+    lobe.position.set(lobeX, lobeY, lobeZ);
+    lobe.userData.basePos = lobe.position.clone();
+    lobe.userData.baseScale = lobe.scale.clone();
+    bodyLobes.push({ mesh: lobe, phase: f * Math.PI * 2 });
+    rig.add(lobe);
+  }
 
   const bodyOutline = new THREE.Mesh(body.geometry, outlineMat);
   bodyOutline.scale.copy(profile.bodyScale).multiplyScalar(1.06);
@@ -1188,12 +1237,21 @@ function applyPhenotype(mesh, baseColor, profile) {
 
   for (let i = 0; i < profile.stripeCount; i += 1) {
     const patch = new THREE.Mesh(new THREE.SphereGeometry(profile.bodyRadius * 0.26, 9, 9), markMat);
-    patch.scale.set(profile.bodyScale.x * 0.68, profile.bodyScale.y * 0.22, profile.bodyScale.z * 0.18);
-    patch.position.set(
-      0,
-      profile.bodyScale.y * (0.08 + i * 0.08),
-      -profile.bodyScale.z * 0.3 + i * profile.bodyScale.z * 0.22
+    const patchJitter = profile.stripeJitter || 0.1;
+    patch.scale.set(
+      profile.bodyScale.x * (0.54 + profileRand() * 0.2),
+      profile.bodyScale.y * (0.17 + profileRand() * 0.08),
+      profile.bodyScale.z * (0.14 + profileRand() * 0.06)
     );
+    const stripeSide = i % 2 === 0 ? -1 : 1;
+    const xOffset = stripeSide * profile.bodyScale.x * patchJitter * (profileRand() * 0.55 + (profile.asymmetry || 0) * 0.28);
+    patch.position.set(
+      xOffset,
+      profile.bodyScale.y * (0.05 + i * 0.08) + (profileRand() * 2 - 1) * profile.bodyScale.y * patchJitter * 0.16,
+      -profile.bodyScale.z * 0.32 + i * profile.bodyScale.z * 0.22 + (profileRand() * 2 - 1) * profile.bodyScale.z * patchJitter * 0.22
+    );
+    patch.rotation.y = (profileRand() * 2 - 1) * 0.35;
+    patch.rotation.x = (profileRand() * 2 - 1) * 0.25;
     markings.push(patch);
     rig.add(patch);
   }
@@ -1218,24 +1276,53 @@ function applyPhenotype(mesh, baseColor, profile) {
   mouth.rotation.x = Math.PI / 2;
   rig.add(mouth);
 
+  const cheekScale = clamp(profile.cheekPuff || 0.2, 0.08, 0.9);
+  const cheekY = head.position.y + profile.headScale.y * 0.02;
+  const cheekZ = head.position.z + profile.headScale.z * 0.3;
   for (const side of [-1, 1]) {
+    const cheek = new THREE.Mesh(
+      new THREE.SphereGeometry(profile.bodyRadius * (0.08 + cheekScale * 0.12), 10, 10),
+      accentMat
+    );
+    cheek.scale.set(
+      0.72 + cheekScale * 0.34,
+      0.62 + cheekScale * 0.26,
+      0.84 + cheekScale * 0.38
+    );
+    cheek.position.set(
+      side * (profile.eyeSpacing * (0.72 + cheekScale * 0.2)),
+      cheekY - profile.eyeScale * (0.66 + profileRand() * 0.2),
+      cheekZ - profile.eyeScale * (0.22 + profileRand() * 0.14)
+    );
+    cheek.userData.basePos = cheek.position.clone();
+    markings.push(cheek);
+    rig.add(cheek);
+  }
+
+  for (const side of [-1, 1]) {
+    const spread = profile.ornamentSpread || 1;
+    const asymBias = (profile.asymmetry || 0) * side * 0.12;
     let ornament;
     if (profile.appendageType === "fin") {
       ornament = new THREE.Mesh(
-        new THREE.BoxGeometry(profile.earSize * 0.22, profile.earSize * 0.05, profile.earSize * 0.48),
-        ornamentMat
-      );
-      ornament.position.set(side * profile.headScale.x * 0.52, head.position.y + profile.headScale.y * 0.12, head.position.z);
-      ornament.rotation.z = side * Math.PI * 0.2;
-      ornament.rotation.x = Math.PI * 0.12;
-    } else {
-      ornament = new THREE.Mesh(
-        new THREE.ConeGeometry(profile.earSize * 0.16, profile.earSize, 8),
+        new THREE.BoxGeometry(profile.earSize * 0.2 * spread, profile.earSize * 0.05, profile.earSize * 0.48),
         ornamentMat
       );
       ornament.position.set(
-        side * profile.headScale.x * 0.44,
-        head.position.y + profile.headScale.y * 0.33,
+        side * profile.headScale.x * (0.48 + spread * 0.08),
+        head.position.y + profile.headScale.y * (0.1 + asymBias * 0.2),
+        head.position.z
+      );
+      ornament.rotation.z = side * Math.PI * (0.17 + spread * 0.04);
+      ornament.rotation.x = Math.PI * 0.12;
+    } else {
+      ornament = new THREE.Mesh(
+        new THREE.ConeGeometry(profile.earSize * 0.16 * spread, profile.earSize * (0.88 + spread * 0.16), 8),
+        ornamentMat
+      );
+      ornament.position.set(
+        side * profile.headScale.x * (0.4 + spread * 0.06),
+        head.position.y + profile.headScale.y * (0.28 + spread * 0.08 + asymBias),
         head.position.z - profile.headScale.z * 0.06
       );
       ornament.rotation.z = side * (-Math.PI * 0.2);
@@ -1261,11 +1348,15 @@ function applyPhenotype(mesh, baseColor, profile) {
   for (let i = 0; i < profile.appendageCount; i += 1) {
     const ang = (i / profile.appendageCount) * Math.PI * 2;
     const dir = new THREE.Vector3(Math.cos(ang), 0, Math.sin(ang));
-    const y = profile.appendageType === "leg" ? -profile.bodyScale.y * 0.55 : 0;
+    const localVariance = 0.78 + profileRand() * 0.44;
+    const asymSign = i % 2 === 0 ? -1 : 1;
+    const asymScale = 1 + (profile.asymmetry || 0) * asymSign * 0.14;
+    const limbLength = clamp(profile.appendageLength * localVariance * asymScale, 0.14, 1.9);
+    const y = profile.appendageType === "leg" ? -profile.bodyScale.y * (0.46 + profileRand() * 0.16) : 0;
     let limb;
     if (profile.appendageType === "fin") {
       limb = new THREE.Mesh(
-        new THREE.BoxGeometry(profile.appendageLength * 0.2, profile.appendageLength * 0.07, profile.appendageLength),
+        new THREE.BoxGeometry(limbLength * 0.22, limbLength * 0.07, limbLength),
         accentMat
       );
       limb.position.copy(dir.clone().multiplyScalar(profile.bodyScale.x * 0.65));
@@ -1273,15 +1364,15 @@ function applyPhenotype(mesh, baseColor, profile) {
       limb.lookAt(limb.position.clone().add(dir));
     } else if (profile.appendageType === "leg") {
       limb = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.05, 0.08, profile.appendageLength, 7),
+        new THREE.CylinderGeometry(0.045 + profileRand() * 0.02, 0.07 + profileRand() * 0.03, limbLength, 7),
         accentMat
       );
       limb.position.copy(dir.clone().multiplyScalar(profile.bodyScale.x * 0.58));
-      limb.position.y = y - profile.appendageLength * 0.35;
+      limb.position.y = y - limbLength * 0.35;
       limb.rotation.z = Math.sin(ang) * 0.25;
     } else {
       limb = new THREE.Mesh(
-        new THREE.ConeGeometry(0.08, profile.appendageLength, 8),
+        new THREE.ConeGeometry(0.07 + profileRand() * 0.03, limbLength, 8),
         accentMat
       );
       limb.position.copy(dir.clone().multiplyScalar(profile.bodyScale.x * 0.66));
@@ -1293,6 +1384,7 @@ function applyPhenotype(mesh, baseColor, profile) {
       mesh: limb,
       rest: limb.rotation.clone(),
       phase: (i / profile.appendageCount) * Math.PI * 2,
+      stride: 0.86 + profileRand() * 0.4,
     });
     rig.add(limb);
   }
@@ -1316,9 +1408,32 @@ function applyPhenotype(mesh, baseColor, profile) {
     rig.add(spike);
   }
 
-  const tail = new THREE.Mesh(new THREE.ConeGeometry(0.09 + profile.tailLength * 0.02, profile.tailLength, 9), accentMat);
-  tail.position.set(0, 0, -profile.bodyScale.z * 0.95);
+  const tail = new THREE.Group();
+  tail.position.set(0, 0, -profile.bodyScale.z * 0.84);
   tail.rotation.x = Math.PI / 2;
+  const tailParts = [];
+  const tailSegmentCount = clamp(Math.round(profile.tailSegments || 3), 2, 8);
+  const segGap = profile.tailLength / tailSegmentCount;
+  for (let i = 0; i < tailSegmentCount; i += 1) {
+    const f = i / Math.max(1, tailSegmentCount - 1);
+    const segRadius = clamp((0.09 + profile.tailLength * 0.04) * (1 - f * 0.62), 0.025, 0.16);
+    const seg = new THREE.Mesh(
+      new THREE.SphereGeometry(segRadius, 9, 9),
+      i % 2 === 0 ? accentMat : underMat
+    );
+    seg.scale.set(1 - f * 0.24, 1 - f * 0.28, 1 + f * 0.08);
+    seg.position.set((profile.asymmetry || 0) * (f - 0.5) * 0.08, 0, -segGap * (i + 0.4));
+    seg.userData.basePos = seg.position.clone();
+    tailParts.push({ mesh: seg, phase: f * 1.8 });
+    tail.add(seg);
+  }
+  const tailTip = new THREE.Mesh(
+    new THREE.ConeGeometry(0.055 + profile.tailLength * 0.015, 0.16 + profile.tailLength * 0.3, 9),
+    accentMat
+  );
+  tailTip.position.set(0, 0, -profile.tailLength - segGap * 0.4);
+  tailTip.rotation.x = Math.PI / 2;
+  tail.add(tailTip);
   rig.add(tail);
 
   const eyeLeft = new THREE.Mesh(new THREE.SphereGeometry(profile.eyeScale, 10, 10), eyeMat);
@@ -1349,10 +1464,11 @@ function applyPhenotype(mesh, baseColor, profile) {
   mesh.userData.phenotypeRig = {
     group: rig,
     body,
+    bodyLobes,
     head,
     snout: { mesh: snout, rest: snout.rotation.clone() },
     mouth: { mesh: mouth, rest: mouth.rotation.clone() },
-    tail: { mesh: tail, rest: tail.rotation.clone() },
+    tail: { mesh: tail, rest: tail.rotation.clone(), segments: tailParts, tip: tailTip },
     shadow,
     eyes: [eyeLeft, eyeRight],
     pupils: [pupilLeft, pupilRight],
@@ -1386,6 +1502,22 @@ function animatePhenotype(mesh, speedNorm, t, dt) {
     rig.body.rotation.x = Math.cos(phase * 0.35) * (0.01 + speed * (0.04 + cuteMotion * 0.02));
   }
 
+  if (rig.bodyLobes) {
+    for (const lobe of rig.bodyLobes) {
+      const basePos = lobe.mesh.userData.basePos;
+      const baseScale = lobe.mesh.userData.baseScale;
+      const pulse = Math.sin(phase * 0.52 + lobe.phase) * (0.04 + speed * 0.07);
+      if (basePos) {
+        lobe.mesh.position.x = basePos.x + Math.sin(phase * 0.36 + lobe.phase) * 0.02;
+        lobe.mesh.position.y = basePos.y + pulse * 0.04;
+      }
+      if (baseScale) {
+        lobe.mesh.scale.y = baseScale.y * (1 + pulse * 0.16);
+        lobe.mesh.scale.z = baseScale.z * (1 - pulse * 0.1);
+      }
+    }
+  }
+
   if (rig.head) {
     rig.head.rotation.y = Math.sin(phase * 0.44) * (0.06 + speed * 0.08);
     rig.head.rotation.x = Math.cos(phase * 0.36) * (0.03 + speed * 0.05);
@@ -1404,22 +1536,37 @@ function animatePhenotype(mesh, speedNorm, t, dt) {
     const tailWag = (profile.appendageType === "fin" ? 0.45 : 0.28) + cuteMotion * 0.04;
     rig.tail.mesh.rotation.y = rig.tail.rest.y + Math.sin(phase * 0.9) * (tailWag * idle);
     rig.tail.mesh.rotation.x = rig.tail.rest.x + Math.cos(phase * 0.6) * 0.08 * idle;
+    if (rig.tail.segments) {
+      for (const segment of rig.tail.segments) {
+        const basePos = segment.mesh.userData.basePos;
+        if (!basePos) continue;
+        const sway = Math.sin(phase * 1.1 + segment.phase * 2.4) * 0.08 * idle;
+        segment.mesh.position.x = basePos.x + sway;
+        segment.mesh.position.y = basePos.y + Math.cos(phase * 0.8 + segment.phase) * 0.018 * idle;
+      }
+    }
+    if (rig.tail.tip) {
+      rig.tail.tip.rotation.z = Math.sin(phase * 1.2) * 0.22 * idle;
+    }
   }
 
   for (const limb of rig.appendages) {
     if (profile.appendageType === "leg") {
+      const stride = limb.stride || 1;
       limb.mesh.rotation.x =
-        limb.rest.x + Math.sin(phase + limb.phase) * (0.22 + speed * (0.72 + cuteMotion * 0.07));
-      limb.mesh.rotation.z = limb.rest.z + Math.cos(phase * 0.6 + limb.phase) * 0.12;
+        limb.rest.x + Math.sin(phase + limb.phase) * (0.22 + speed * (0.72 + cuteMotion * 0.07)) * stride;
+      limb.mesh.rotation.z = limb.rest.z + Math.cos(phase * 0.6 + limb.phase) * 0.12 * stride;
       continue;
     }
     if (profile.appendageType === "fin") {
+      const stride = limb.stride || 1;
       limb.mesh.rotation.z =
-        limb.rest.z + Math.sin(phase * 0.8 + limb.phase) * (0.14 + speed * (0.28 + cuteMotion * 0.06));
-      limb.mesh.rotation.y = limb.rest.y + Math.cos(phase * 0.7 + limb.phase) * 0.12;
+        limb.rest.z + Math.sin(phase * 0.8 + limb.phase) * (0.14 + speed * (0.28 + cuteMotion * 0.06)) * stride;
+      limb.mesh.rotation.y = limb.rest.y + Math.cos(phase * 0.7 + limb.phase) * 0.12 * stride;
       continue;
     }
-    limb.mesh.rotation.x = limb.rest.x + Math.sin(phase * 0.45 + limb.phase) * (0.04 + speed * 0.08);
+    limb.mesh.rotation.x =
+      limb.rest.x + Math.sin(phase * 0.45 + limb.phase) * (0.04 + speed * 0.08) * (limb.stride || 1);
   }
 
   for (const spine of rig.dorsal) {
