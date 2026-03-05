@@ -188,6 +188,8 @@ const DEFAULT_PHENOTYPE_DNA = Object.freeze({
   pattern: 0.5,
 });
 const PHENOTYPE_DNA_KEYS = Object.keys(DEFAULT_PHENOTYPE_DNA);
+const PHENOTYPE_SKIN_CACHE = new Map();
+const PHENOTYPE_SKIN_CACHE_MAX = 160;
 
 const SPECIES_ARCHETYPES = Object.freeze({
   generalist: "Generalist",
@@ -891,6 +893,160 @@ function phenotypeColorFromDNA(role, dnaSource, seed) {
   return new THREE.Color().setHSL(h, s, l).getHex();
 }
 
+function phenotypeSkinCacheKey(baseColorHex, profile) {
+  const color = new THREE.Color(baseColorHex);
+  const hsl = {};
+  color.getHSL(hsl);
+  const dna = sanitizePhenotypeDNA(profile && profile.dna);
+  const role = (profile && profile.role) || "neutral";
+  const patternType = (profile && profile.patternType) || "stripes";
+  const seedBin = ((Number(profile && profile.seed) || 1) >>> 0) % 31;
+  return [
+    role,
+    patternType,
+    Math.round(hsl.h * 24),
+    Math.round(hsl.s * 14),
+    Math.round(hsl.l * 14),
+    Math.round(dna.pattern * 7),
+    Math.round(dna.pigment * 7),
+    Math.round(dna.mass * 7),
+    Math.round(dna.tail * 7),
+    seedBin,
+  ].join(":");
+}
+
+function buildPhenotypeSkinTexture(baseColorHex, profile) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+
+  const base = new THREE.Color(baseColorHex);
+  const dna = sanitizePhenotypeDNA(profile && profile.dna);
+  const role = (profile && profile.role) || "neutral";
+  const patternType = (profile && profile.patternType) || "stripes";
+  const next = seeded((((profile && profile.seed) || 1) >>> 0) ^ 0x8f1bbcdc);
+
+  const light = base.clone().offsetHSL(0.02, 0.06, 0.12);
+  const mid = base.clone();
+  const dark = base.clone().offsetHSL(-0.03, -0.06, -0.14);
+  const accent = role === "predator"
+    ? base.clone().offsetHSL(-0.02, 0.1, -0.2)
+    : base.clone().offsetHSL(0.03 + (dna.pigment - 0.5) * 0.08, 0.1, -0.04);
+  const warm = base.clone().offsetHSL(0.01, 0.04, 0.06);
+
+  const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+  gradient.addColorStop(0, `#${light.getHexString()}`);
+  gradient.addColorStop(0.46, `#${mid.getHexString()}`);
+  gradient.addColorStop(1, `#${dark.getHexString()}`);
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const overlayCount = 5 + Math.round(dna.mass * 5 + dna.pattern * 4);
+  for (let i = 0; i < overlayCount; i += 1) {
+    const x = next() * canvas.width;
+    const y = next() * canvas.height;
+    const r = 5 + next() * 13;
+    const alpha = 0.05 + next() * 0.08;
+    ctx.fillStyle = `rgba(${Math.round(warm.r * 255)}, ${Math.round(warm.g * 255)}, ${Math.round(warm.b * 255)}, ${alpha.toFixed(3)})`;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (patternType === "spots") {
+    const spotCount = 9 + Math.round(dna.pattern * 12);
+    ctx.fillStyle = `rgba(${Math.round(accent.r * 255)}, ${Math.round(accent.g * 255)}, ${Math.round(accent.b * 255)}, 0.35)`;
+    for (let i = 0; i < spotCount; i += 1) {
+      const x = next() * canvas.width;
+      const y = next() * canvas.height;
+      const r = 1.5 + next() * (4 + dna.pattern * 4);
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else if (patternType === "saddle") {
+    const bandWidth = 8 + dna.pattern * 16;
+    ctx.fillStyle = `rgba(${Math.round(accent.r * 255)}, ${Math.round(accent.g * 255)}, ${Math.round(accent.b * 255)}, 0.28)`;
+    ctx.fillRect(0, canvas.height * 0.18, canvas.width, bandWidth);
+    ctx.fillRect(0, canvas.height * 0.62, canvas.width, bandWidth * 0.75);
+    ctx.strokeStyle = `rgba(${Math.round(dark.r * 255)}, ${Math.round(dark.g * 255)}, ${Math.round(dark.b * 255)}, 0.28)`;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(0, canvas.height * 0.18, canvas.width, bandWidth);
+  } else if (patternType === "rosette") {
+    const ringCount = 7 + Math.round(dna.pattern * 10);
+    ctx.strokeStyle = `rgba(${Math.round(accent.r * 255)}, ${Math.round(accent.g * 255)}, ${Math.round(accent.b * 255)}, 0.34)`;
+    ctx.lineWidth = 1.8;
+    for (let i = 0; i < ringCount; i += 1) {
+      const x = next() * canvas.width;
+      const y = next() * canvas.height;
+      const r = 2 + next() * 4.8;
+      ctx.beginPath();
+      ctx.ellipse(x, y, r * (0.86 + next() * 0.4), r * (0.86 + next() * 0.4), next() * Math.PI, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  } else {
+    const stripeCount = 4 + Math.round(dna.pattern * 6);
+    ctx.strokeStyle = `rgba(${Math.round(accent.r * 255)}, ${Math.round(accent.g * 255)}, ${Math.round(accent.b * 255)}, 0.28)`;
+    ctx.lineWidth = 2 + dna.pattern * 2.6;
+    for (let i = 0; i < stripeCount; i += 1) {
+      const y = (i + 0.5) * (canvas.height / stripeCount);
+      const wobble = (next() * 2 - 1) * 6.5;
+      ctx.beginPath();
+      ctx.moveTo(0, y + wobble);
+      ctx.bezierCurveTo(
+        canvas.width * 0.3,
+        y - wobble * 0.55,
+        canvas.width * 0.68,
+        y + wobble * 0.55,
+        canvas.width,
+        y - wobble
+      );
+      ctx.stroke();
+    }
+  }
+
+  const noiseCount = 44 + Math.round(dna.pattern * 64);
+  const noiseColor = dna.pigment > 0.52 ? dark : light;
+  for (let i = 0; i < noiseCount; i += 1) {
+    const x = Math.floor(next() * canvas.width);
+    const y = Math.floor(next() * canvas.height);
+    const alpha = 0.035 + next() * 0.07;
+    ctx.fillStyle = `rgba(${Math.round(noiseColor.r * 255)}, ${Math.round(noiseColor.g * 255)}, ${Math.round(noiseColor.b * 255)}, ${alpha.toFixed(3)})`;
+    ctx.fillRect(x, y, 1 + (next() > 0.86 ? 1 : 0), 1 + (next() > 0.9 ? 1 : 0));
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.generateMipmaps = true;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.anisotropy = 4;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+function getPhenotypeSkinTexture(baseColorHex, profile) {
+  const key = phenotypeSkinCacheKey(baseColorHex, profile);
+  if (PHENOTYPE_SKIN_CACHE.has(key)) {
+    return PHENOTYPE_SKIN_CACHE.get(key);
+  }
+  const texture = buildPhenotypeSkinTexture(baseColorHex, profile);
+  if (!texture) return null;
+  PHENOTYPE_SKIN_CACHE.set(key, texture);
+  if (PHENOTYPE_SKIN_CACHE.size > PHENOTYPE_SKIN_CACHE_MAX) {
+    const oldest = PHENOTYPE_SKIN_CACHE.keys().next();
+    if (!oldest.done) {
+      const stale = PHENOTYPE_SKIN_CACHE.get(oldest.value);
+      if (stale && typeof stale.dispose === "function") stale.dispose();
+      PHENOTYPE_SKIN_CACHE.delete(oldest.value);
+    }
+  }
+  return texture;
+}
+
 function speciesFromTraits(traits, dnaSource) {
   const t = sanitizeTraits(traits);
   const dna = sanitizePhenotypeDNA(dnaSource || t);
@@ -1021,6 +1177,15 @@ function makePhenotypeProfile(opts) {
   const earSize = clamp(0.1 + t.social * 0.2 + cute * 0.1 + next() * 0.06, 0.08, 0.44);
   let stripeCount = clamp(Math.round(1 + t.carnivore * 2 + t.heat * 1.5 + next() * 1.5), 1, 4);
   stripeCount = clamp(Math.round(stripeCount + (dna.pattern - 0.5) * 2), 1, 6);
+  const patternRoll = dna.pattern * 0.7 + dna.pigment * 0.2 + next() * 0.45;
+  let patternType = "stripes";
+  if (patternRoll > 0.98) {
+    patternType = "rosette";
+  } else if (patternRoll > 0.78) {
+    patternType = "spots";
+  } else if (patternRoll < 0.34) {
+    patternType = "saddle";
+  }
   let headScale = new THREE.Vector3(
     clamp(bodyScale.x * (0.54 + t.social * 0.11 + cute * 0.06), 0.48, 1.15),
     clamp(bodyScale.y * (0.48 + t.stamina * 0.1 + cute * 0.05), 0.45, 1.1),
@@ -1086,6 +1251,7 @@ function makePhenotypeProfile(opts) {
       1,
       6
     );
+    if (heritage.carnivore > 0.52 && patternType === "spots") patternType = "rosette";
     lobeCount = clamp(
       Math.round(lobeCount + generationProgress * (1 + heritage.social * 0.9)),
       2,
@@ -1120,6 +1286,7 @@ function makePhenotypeProfile(opts) {
     cheekPuff,
     tailSegments,
     ornamentSpread,
+    patternType,
   };
 }
 
@@ -1172,6 +1339,27 @@ function applyPhenotype(mesh, baseColor, profile) {
     opacity: 0.25,
     depthWrite: false,
   });
+  const skinMap = getPhenotypeSkinTexture(baseColor, profile);
+  if (skinMap) {
+    bodyMat.map = skinMap;
+    bodyMat.bumpMap = skinMap;
+    bodyMat.bumpScale = 0.012;
+    bodyMat.roughness = 0.58;
+
+    accentMat.map = skinMap;
+    accentMat.bumpMap = skinMap;
+    accentMat.bumpScale = 0.016;
+    accentMat.roughness = 0.48;
+
+    underMat.map = skinMap;
+    underMat.bumpMap = skinMap;
+    underMat.bumpScale = 0.01;
+    underMat.roughness = 0.62;
+
+    markMat.map = skinMap;
+    markMat.bumpMap = skinMap;
+    markMat.bumpScale = 0.008;
+  }
 
   const tintLayers = [
     { material: bodyMat, h: 0, s: 0, l: 0 },
@@ -1235,25 +1423,64 @@ function applyPhenotype(mesh, baseColor, profile) {
   belly.position.set(0, -profile.bodyScale.y * 0.2, profile.bodyScale.z * 0.12);
   rig.add(belly);
 
-  for (let i = 0; i < profile.stripeCount; i += 1) {
-    const patch = new THREE.Mesh(new THREE.SphereGeometry(profile.bodyRadius * 0.26, 9, 9), markMat);
-    const patchJitter = profile.stripeJitter || 0.1;
-    patch.scale.set(
-      profile.bodyScale.x * (0.54 + profileRand() * 0.2),
-      profile.bodyScale.y * (0.17 + profileRand() * 0.08),
-      profile.bodyScale.z * (0.14 + profileRand() * 0.06)
-    );
-    const stripeSide = i % 2 === 0 ? -1 : 1;
-    const xOffset = stripeSide * profile.bodyScale.x * patchJitter * (profileRand() * 0.55 + (profile.asymmetry || 0) * 0.28);
-    patch.position.set(
-      xOffset,
-      profile.bodyScale.y * (0.05 + i * 0.08) + (profileRand() * 2 - 1) * profile.bodyScale.y * patchJitter * 0.16,
-      -profile.bodyScale.z * 0.32 + i * profile.bodyScale.z * 0.22 + (profileRand() * 2 - 1) * profile.bodyScale.z * patchJitter * 0.22
-    );
-    patch.rotation.y = (profileRand() * 2 - 1) * 0.35;
-    patch.rotation.x = (profileRand() * 2 - 1) * 0.25;
-    markings.push(patch);
-    rig.add(patch);
+  const patchJitter = profile.stripeJitter || 0.1;
+  if (profile.patternType === "spots" || profile.patternType === "rosette") {
+    const spotCount = profile.stripeCount * 2 + (profile.patternType === "rosette" ? 2 : 0);
+    for (let i = 0; i < spotCount; i += 1) {
+      const patch = new THREE.Mesh(
+        new THREE.SphereGeometry(profile.bodyRadius * (profile.patternType === "rosette" ? 0.2 : 0.18), 9, 9),
+        markMat
+      );
+      const side = i % 2 === 0 ? -1 : 1;
+      const spotScale = profile.patternType === "rosette" ? 0.34 : 0.24;
+      patch.scale.set(
+        profile.bodyScale.x * (spotScale + profileRand() * 0.14),
+        profile.bodyScale.y * (0.12 + profileRand() * 0.08),
+        profile.bodyScale.z * (0.13 + profileRand() * 0.08)
+      );
+      patch.position.set(
+        side * profile.bodyScale.x * (0.12 + profileRand() * 0.2),
+        -profile.bodyScale.y * (0.12 + profileRand() * 0.2),
+        -profile.bodyScale.z * 0.28 + profileRand() * profile.bodyScale.z * 0.84
+      );
+      patch.rotation.y = (profileRand() * 2 - 1) * 0.4;
+      markings.push(patch);
+      rig.add(patch);
+    }
+  } else if (profile.patternType === "saddle") {
+    for (let i = 0; i < 2; i += 1) {
+      const patch = new THREE.Mesh(new THREE.SphereGeometry(profile.bodyRadius * (0.31 - i * 0.04), 10, 10), markMat);
+      patch.scale.set(
+        profile.bodyScale.x * (0.72 - i * 0.14),
+        profile.bodyScale.y * (0.19 - i * 0.03),
+        profile.bodyScale.z * (0.23 - i * 0.04)
+      );
+      patch.position.set(0, profile.bodyScale.y * (0.04 + i * 0.05), -profile.bodyScale.z * (0.14 - i * 0.2));
+      patch.rotation.y = (profileRand() * 2 - 1) * 0.2;
+      markings.push(patch);
+      rig.add(patch);
+    }
+  } else {
+    for (let i = 0; i < profile.stripeCount; i += 1) {
+      const patch = new THREE.Mesh(new THREE.SphereGeometry(profile.bodyRadius * 0.26, 9, 9), markMat);
+      patch.scale.set(
+        profile.bodyScale.x * (0.54 + profileRand() * 0.2),
+        profile.bodyScale.y * (0.17 + profileRand() * 0.08),
+        profile.bodyScale.z * (0.14 + profileRand() * 0.06)
+      );
+      const stripeSide = i % 2 === 0 ? -1 : 1;
+      const xOffset =
+        stripeSide * profile.bodyScale.x * patchJitter * (profileRand() * 0.55 + (profile.asymmetry || 0) * 0.28);
+      patch.position.set(
+        xOffset,
+        profile.bodyScale.y * (0.05 + i * 0.08) + (profileRand() * 2 - 1) * profile.bodyScale.y * patchJitter * 0.16,
+        -profile.bodyScale.z * 0.32 + i * profile.bodyScale.z * 0.22 + (profileRand() * 2 - 1) * profile.bodyScale.z * patchJitter * 0.22
+      );
+      patch.rotation.y = (profileRand() * 2 - 1) * 0.35;
+      patch.rotation.x = (profileRand() * 2 - 1) * 0.25;
+      markings.push(patch);
+      rig.add(patch);
+    }
   }
 
   const snout = new THREE.Mesh(
@@ -1869,7 +2096,15 @@ function phenotypeLabel(traits, profile) {
       : profile.bodyScale.y < 0.92
         ? "compact"
         : "balanced";
-  return `${frame} ${locomotion} ${diet}`;
+  const coat =
+    profile.patternType === "spots"
+      ? "spotted"
+      : profile.patternType === "saddle"
+        ? "banded"
+        : profile.patternType === "rosette"
+          ? "rosette"
+          : "striped";
+  return `${frame} ${coat} ${locomotion} ${diet}`;
 }
 
 function refreshPlayerPhenotype(force) {
@@ -3480,7 +3715,15 @@ function matePhenotypeDescriptor(profile, traits) {
   const appendage =
     profile.appendageType === "leg" ? "legged" : profile.appendageType === "fin" ? "finned" : "spined";
   const tail = profile.tailLength > 1.15 ? "long tail" : profile.tailLength < 0.58 ? "short tail" : "medium tail";
-  return `${build} ${appendage} (${profile.appendageCount}) ${tail} ${dietBiasLabel(traits)}`;
+  const coat =
+    profile.patternType === "spots"
+      ? "spots"
+      : profile.patternType === "saddle"
+        ? "bands"
+        : profile.patternType === "rosette"
+          ? "rosette"
+          : "stripes";
+  return `${build} ${appendage} (${profile.appendageCount}) ${tail} ${coat} ${dietBiasLabel(traits)}`;
 }
 
 function mateGenePullSummary(mate, count) {

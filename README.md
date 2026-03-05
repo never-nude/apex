@@ -76,6 +76,7 @@ Open: `http://127.0.0.1:8158`
 - Mate lock HUD line + world-space lock beam now prioritize your selected mate (`M#`) and turn green in interaction range.
 - Mate cards are shown in HUD with trait deltas and requirement shorthand so evolution choices can be deliberate.
 - Creature presentation pass: segmented body/head rigs, snout/mouth/ornament features, eye+pupil animation, markings, outline shell, and soft ground shadow.
+- Creature presentation now adds cached procedural skin textures (stripes/spots/rosettes/bands) and stronger per-organism silhouette asymmetry.
 - Mates can have requirements (forage/chase/energy), and rivals can steal mates.
 - World/biome pass now emulates mixed terrain profiles inspired by places like New Zealand and Costa Rica:
   - Coastal beaches and lowlands
